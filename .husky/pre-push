@@ -5,15 +5,27 @@ if [ "$branch" = "main" ]; then
   exit 1
 fi
 
-# Detect if running on Windows and use pnpm.cmd, otherwise use pnpm.
-if [ "$OS" = "Windows_NT" ]; then
-  pnpm_cmd="pnpm.cmd"
+# Prefer the repository's declared package manager. On Windows, use the .exe
+# shim explicitly so Git Bash does not select a stale Unix npx earlier in PATH.
+if command -v npx.exe >/dev/null 2>&1; then
+	npx_cmd="npx.exe"
+elif command -v npx >/dev/null 2>&1; then
+	npx_cmd="npx"
 else
-  if command -v pnpm >/dev/null 2>&1; then
-    pnpm_cmd="pnpm"
-  else
-    pnpm_cmd="npx pnpm"
-  fi
+	npx_cmd=""
+fi
+
+if command -v pnpm.exe >/dev/null 2>&1; then
+	pnpm_cmd="pnpm.exe"
+elif command -v pnpm.cmd >/dev/null 2>&1; then
+	pnpm_cmd="pnpm.cmd"
+elif command -v pnpm >/dev/null 2>&1; then
+	pnpm_cmd="pnpm"
+elif [ -n "$npx_cmd" ]; then
+	pnpm_cmd="$npx_cmd --no-install pnpm"
+else
+	echo "Neither pnpm nor npx was found; cannot run pre-push checks."
+	exit 127
 fi
 
 $pnpm_cmd run check-types
@@ -21,8 +33,8 @@ $pnpm_cmd run check-types
 # Use dotenvx to securely load .env.local and run commands that depend on it
 if [ -f ".env.local" ]; then
   # Check if RUN_TESTS_ON_PUSH is set to true and run tests with dotenvx
-  if npx dotenvx get RUN_TESTS_ON_PUSH -f .env.local 2>/dev/null | grep -q "^true$"; then
-    npx dotenvx run -f .env.local -- $pnpm_cmd run test
+  if [ -n "$npx_cmd" ] && $npx_cmd --no-install dotenvx get RUN_TESTS_ON_PUSH -f .env.local 2>/dev/null | grep -q "^true$"; then
+    $npx_cmd --no-install dotenvx run -f .env.local -- $pnpm_cmd run test
   fi
 else
   # Fallback: run tests if RUN_TESTS_ON_PUSH is set in regular environment

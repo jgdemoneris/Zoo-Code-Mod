@@ -5,22 +5,19 @@ if [ "$branch" = "main" ]; then
   exit 1
 fi
 
-# Detect if running on Windows and use pnpm.cmd, otherwise use pnpm.
-if [ "$OS" = "Windows_NT" ]; then
-  pnpm_cmd="pnpm.cmd"
+# Prefer the repository's declared package manager. On Windows, use the .exe
+# shim explicitly so Git Bash does not select a stale Unix npx earlier in PATH.
+if command -v pnpm.exe >/dev/null 2>&1; then
+	pnpm.exe exec lint-staged
+elif command -v pnpm.cmd >/dev/null 2>&1; then
+	pnpm.cmd exec lint-staged
+elif command -v pnpm >/dev/null 2>&1; then
+	pnpm exec lint-staged
+elif command -v npx.exe >/dev/null 2>&1; then
+	npx.exe --no-install lint-staged
+elif command -v npx >/dev/null 2>&1; then
+	npx --no-install lint-staged
 else
-  if command -v pnpm >/dev/null 2>&1; then
-    pnpm_cmd="pnpm"
-  else
-    pnpm_cmd="npx pnpm"
-  fi
+	echo "Neither pnpm nor npx was found; cannot run lint-staged."
+	exit 127
 fi
-
-# Detect if running on Windows and use npx.cmd, otherwise use npx.
-if [ "$OS" = "Windows_NT" ]; then
-  npx_cmd="npx.cmd"
-else
-  npx_cmd="npx"
-fi
-
-$npx_cmd lint-staged

@@ -231,6 +231,13 @@ describe("ExtensionStateContext", () => {
 		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
+	it("defaults current time and cost context to disabled", () => {
+		const state = createInitialExtensionState()
+
+		expect(state.includeCurrentTime).toBe(false)
+		expect(state.includeCurrentCost).toBe(false)
+	})
+
 	it("initializes shadowed context fields from initialState", () => {
 		const routerModels = {} as RouterModels
 		const marketplaceItems: MarketplaceItem[] = [

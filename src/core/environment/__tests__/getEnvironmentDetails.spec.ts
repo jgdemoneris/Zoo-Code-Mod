@@ -5,7 +5,6 @@ import delay from "delay"
 import type { Mock } from "vitest"
 
 import { getEnvironmentDetails } from "../getEnvironmentDetails"
-import { getFullModeDetails } from "../../../shared/modes"
 import { isToolAllowedForMode } from "../../tools/validateToolUse"
 import { getApiMetrics } from "../../../shared/getApiMetrics"
 import { listFiles } from "../../../services/glob/list-files"
@@ -13,7 +12,6 @@ import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistr
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { arePathsEqual } from "../../../utils/path"
 import { FileContextTracker } from "../../context-tracking/FileContextTracker"
-import { ApiHandler } from "../../../api/index"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { RooIgnoreController } from "../../ignore/RooIgnoreController"
 import { formatResponse } from "../../prompts/responses"
@@ -42,7 +40,6 @@ vi.mock("execa", () => ({
 	execa: vi.fn(),
 }))
 
-vi.mock("../../../shared/modes")
 vi.mock("../../../shared/getApiMetrics")
 vi.mock("../../../services/glob/list-files")
 vi.mock("../../../integrations/terminal/TerminalRegistry")
@@ -81,6 +78,8 @@ describe("getEnvironmentDetails", () => {
 			customInstructions: "test instructions",
 			language: "en",
 			showRooIgnoredFiles: false,
+			includeCurrentTime: true,
+			includeCurrentCost: true,
 		}
 
 		mockProvider = {
@@ -109,11 +108,6 @@ describe("getEnvironmentDetails", () => {
 				dispose: vi.fn(),
 			} as unknown as RooIgnoreController,
 			clineMessages: [],
-			api: {
-				getModel: vi.fn().mockReturnValue({ id: "test-model", info: { contextWindow: 100000 } }),
-				createMessage: vi.fn(),
-				countTokens: vi.fn(),
-			} as unknown as ApiHandler,
 			providerRef: {
 				deref: vi.fn().mockReturnValue(mockProvider),
 				[Symbol.toStringTag]: "WeakRef",
@@ -122,11 +116,6 @@ describe("getEnvironmentDetails", () => {
 
 		// Mock other dependencies.
 		;(getApiMetrics as Mock).mockReturnValue({ contextTokens: 50000, totalCost: 0.25 })
-		;(getFullModeDetails as Mock).mockResolvedValue({
-			name: "💻 Code",
-			roleDefinition: "You are a code assistant",
-			customInstructions: "Custom instructions",
-		})
 		;(isToolAllowedForMode as Mock).mockReturnValue(true)
 		;(listFiles as Mock).mockResolvedValue([["file1.ts", "file2.ts"], false])
 		;(formatResponse.formatFilesList as Mock).mockReturnValue("file1.ts\nfile2.ts")
@@ -153,19 +142,27 @@ describe("getEnvironmentDetails", () => {
 		expect(result).not.toContain("# Git Status") // Git status is disabled by default (maxGitStatusFiles = 0)
 		expect(result).toContain("# Current Cost")
 		expect(result).toContain("# Current Mode")
-		expect(result).toContain("<model>test-model</model>")
+		expect(result).not.toContain("<model>")
+		expect(result).not.toContain("<name>")
+		expect(result).not.toContain("<role>")
 
 		expect(mockProvider.getState).toHaveBeenCalled()
 
 		expect(mockCline.getTaskMode).toHaveBeenCalled()
 		expect(result).toContain("<slug>code</slug>")
-		expect(getFullModeDetails).toHaveBeenCalledWith("code", [], undefined, {
-			cwd: mockCwd,
-			globalCustomInstructions: "test instructions",
-			language: "en",
-		})
 
 		expect(getApiMetrics).toHaveBeenCalledWith(mockCline.clineMessages)
+	})
+
+	it("omits current time and cost when those settings are disabled or unset", async () => {
+		delete mockState.includeCurrentTime
+		delete mockState.includeCurrentCost
+
+		const result = await getEnvironmentDetails(mockCline as Task)
+
+		expect(result).not.toContain("# Current Time")
+		expect(result).not.toContain("# Current Cost")
+		expect(getApiMetrics).not.toHaveBeenCalled()
 	})
 
 	it("should include file details when includeFileDetails is true", async () => {
@@ -475,21 +472,11 @@ describe("getEnvironmentDetails", () => {
 		// Provider mode stays "code"; task was delegated to "architect".
 		mockState.mode = "code"
 		;(mockCline.getTaskMode as Mock).mockResolvedValue("architect")
-		;(getFullModeDetails as Mock).mockResolvedValue({
-			name: "🏗️ Architect",
-			roleDefinition: "You design software.",
-			customInstructions: "",
-		})
-
 		const result = await getEnvironmentDetails(mockCline as Task)
 
 		expect(result).toContain("<slug>architect</slug>")
 		expect(result).not.toContain("<slug>code</slug>")
-		expect(getFullModeDetails).toHaveBeenCalledWith(
-			"architect",
-			[],
-			undefined,
-			expect.objectContaining({ cwd: mockCwd }),
-		)
+		expect(result).not.toContain("<name>")
+		expect(result).not.toContain("<role>")
 	})
 })

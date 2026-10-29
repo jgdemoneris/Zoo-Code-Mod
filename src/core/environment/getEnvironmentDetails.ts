@@ -5,8 +5,6 @@ import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
 import delay from "delay"
 
-import { formatLanguage } from "../../shared/language"
-import { getFullModeDetails } from "../../shared/modes"
 import { getApiMetrics } from "../../shared/getApiMetrics"
 import { listFiles } from "../../services/glob/list-files"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
@@ -171,7 +169,7 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 	}
 
 	// Get settings for time and cost display
-	const { includeCurrentTime = true, includeCurrentCost = true, maxGitStatusFiles = 0 } = state ?? {}
+	const { includeCurrentTime = false, includeCurrentCost = false, maxGitStatusFiles = 0 } = state ?? {}
 
 	// Add current time information with timezone (if enabled).
 	if (includeCurrentTime) {
@@ -199,25 +197,13 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 		details += `\n\n# Current Cost\n${totalCost !== null ? `$${totalCost.toFixed(2)}` : "(Not available)"}`
 	}
 
-	const { id: modelId } = cline.api.getModel()
-
-	// Add current mode and any mode-specific warnings.
-	const { customModes, customModePrompts, customInstructions: globalCustomInstructions, language } = state ?? {}
+	// Add the task-local mode identifier. The full mode details are already in the system prompt.
 
 	// Read the task-local mode, not the shared provider mode.
 	// A delegated child task may run in a different mode than its parent.
 	const currentMode = await cline.getTaskMode()
 
-	const modeDetails = await getFullModeDetails(currentMode, customModes, customModePrompts, {
-		cwd: cline.cwd,
-		globalCustomInstructions,
-		language: language ?? formatLanguage(vscode.env.language),
-	})
-
-	details += `\n\n# Current Mode\n`
-	details += `<slug>${currentMode}</slug>\n`
-	details += `<name>${modeDetails.name}</name>\n`
-	details += `<model>${modelId}</model>\n`
+	details += `\n\n# Current Mode\n<slug>${currentMode}</slug>`
 
 	if (includeFileDetails) {
 		details += `\n\n# Current Workspace Directory (${cline.cwd.toPosix()}) Files\n`

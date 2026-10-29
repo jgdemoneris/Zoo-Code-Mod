@@ -275,8 +275,8 @@ export const createInitialExtensionState = (): ExtensionState => ({
 	maxDiagnosticMessages: 50,
 	openRouterImageApiKey: "",
 	openRouterImageGenerationSelectedModel: "",
-	includeCurrentTime: true,
-	includeCurrentCost: true,
+	includeCurrentTime: false,
+	includeCurrentCost: false,
 	lockApiConfigAcrossModes: false,
 })
 
@@ -322,8 +322,8 @@ export const ExtensionStateContextProvider: React.FC<{
 	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(
 		() => initialState?.includeTaskHistoryInEnhance ?? true,
 	)
-	const [includeCurrentTime, setIncludeCurrentTime] = useState(() => initialState?.includeCurrentTime ?? true)
-	const [includeCurrentCost, setIncludeCurrentCost] = useState(() => initialState?.includeCurrentCost ?? true)
+	const [includeCurrentTime, setIncludeCurrentTime] = useState(() => initialState?.includeCurrentTime ?? false)
+	const [includeCurrentCost, setIncludeCurrentCost] = useState(() => initialState?.includeCurrentCost ?? false)
 
 	const setListApiConfigMeta = useCallback(
 		(value: ProviderSettingsEntry[]) => setState((prevState) => ({ ...prevState, listApiConfigMeta: value })),

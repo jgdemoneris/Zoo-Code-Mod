@@ -226,7 +226,10 @@ describe("SYSTEM_PROMPT", () => {
 			undefined, // rooIgnoreInstructions
 		)
 
-		expect(prompt).toMatchFileSnapshot("./__snapshots__/system-prompt/consistent-system-prompt.snap")
+		expect(prompt).toContain("====\n\nCAPABILITIES")
+		expect(prompt).toContain("tools explicitly provided in your active tool definitions")
+		expect(prompt).not.toContain("====\n\nMODES")
+		expect(prompt).not.toContain("OBJECTIVE")
 	})
 
 	it("should include MCP server info when mcpHub is provided", async () => {
@@ -247,7 +250,8 @@ describe("SYSTEM_PROMPT", () => {
 			undefined, // rooIgnoreInstructions
 		)
 
-		expect(prompt).toMatchFileSnapshot("./__snapshots__/system-prompt/with-mcp-hub-provided.snap")
+		expect(prompt).toContain("MCP servers")
+		expect(prompt).toContain("tools explicitly provided in your active tool definitions")
 	})
 
 	it("should explicitly handle undefined mcpHub", async () => {
@@ -266,7 +270,8 @@ describe("SYSTEM_PROMPT", () => {
 			undefined, // rooIgnoreInstructions
 		)
 
-		expect(prompt).toMatchFileSnapshot("./__snapshots__/system-prompt/with-undefined-mcp-hub.snap")
+		expect(prompt).not.toContain("MCP servers")
+		expect(prompt).toContain("tools explicitly provided in your active tool definitions")
 	})
 
 	it("should include vscode language in custom instructions", async () => {
@@ -578,7 +583,8 @@ describe("SYSTEM_PROMPT", () => {
 		expect(prompt).toContain("CAPABILITIES")
 		expect(prompt).toContain("RULES")
 		expect(prompt).toContain("SYSTEM INFORMATION")
-		expect(prompt).toContain("OBJECTIVE")
+		expect(prompt).not.toContain("OBJECTIVE")
+		expect(prompt).not.toContain("MODES")
 	})
 
 	describe("allowedMcpServers filtering in system prompt", () => {
@@ -695,19 +701,19 @@ describe("SYSTEM_PROMPT", () => {
 			)
 		}
 
-		it("Code & Debug expose execute_command guidance (CAPABILITIES + RULES)", async () => {
+		it("Code & Debug rely on active tool definitions, not prose tool instructions", async () => {
 			for (const mode of ["code", "debug"]) {
 				const prompt = await run(mode)
 				const capabilities = extractSection(prompt, "CAPABILITIES")
 				const rules = extractSection(prompt, "RULES")
 
-				expect(capabilities).toContain("execute CLI commands on the user's computer")
-				expect(rules).toContain("Before using the execute_command tool")
-				expect(rules).toContain('check the "Actively Running Terminals" section')
+				expect(capabilities).toContain("tools explicitly provided in your active tool definitions")
+				expect(capabilities).not.toContain("execute CLI commands")
+				expect(rules).not.toContain("Before using the execute_command tool")
 			}
 		})
 
-		it("Architect has no execute_command and advertises the \\ .md$ edit restriction", async () => {
+		it("Architect uses tool definitions without command or edit boilerplate", async () => {
 			const prompt = await run("architect")
 			const capabilities = extractSection(prompt, "CAPABILITIES")
 			const rules = extractSection(prompt, "RULES")
@@ -718,19 +724,17 @@ describe("SYSTEM_PROMPT", () => {
 			expect(rules).not.toContain("Before using the execute_command tool")
 			expect(rules).not.toContain('check the "Actively Running Terminals" section')
 			expect(systemInfo).not.toContain("New terminals will be created")
-			// Architect-style edit restriction reflected in CAPABILITIES.
-			expect(capabilities).toContain("in this mode only files matching")
-			expect(capabilities).toContain("\\.md$")
-			expect(capabilities).toContain("Markdown files only")
+			expect(capabilities).toContain("tools explicitly provided in your active tool definitions")
+			expect(capabilities).not.toContain("only files matching")
 		})
 
-		it("Ask advertises no write clause and no execute_command", async () => {
+		it("Ask uses the active tool definitions without enumerating capabilities", async () => {
 			const prompt = await run("ask")
 			const capabilities = extractSection(prompt, "CAPABILITIES")
 
 			expect(capabilities).not.toContain("execute CLI commands")
 			expect(capabilities).not.toContain("write and edit files")
-			expect(capabilities).toContain("read files")
+			expect(capabilities).toContain("tools explicitly provided in your active tool definitions")
 		})
 
 		it("Orchestrator advertises no read/list/edit clauses", async () => {
@@ -740,9 +744,10 @@ describe("SYSTEM_PROMPT", () => {
 			expect(capabilities).not.toContain("read files")
 			expect(capabilities).not.toContain("execute CLI commands")
 			expect(capabilities).not.toContain("write and edit files")
+			expect(prompt).toContain("====\n\nMODES")
 		})
 
-		it("empty groups -> fallback sentence, no per-tool clauses", async () => {
+		it("empty groups use the tool-definition statement", async () => {
 			const customModes: ModeConfig[] = [
 				{
 					slug: "empty-mode",
@@ -754,9 +759,7 @@ describe("SYSTEM_PROMPT", () => {
 			const prompt = await run("empty-mode", { customModes })
 			const capabilities = extractSection(prompt, "CAPABILITIES")
 
-			// No per-tool clauses remain -> the fallback sentence is emitted.
-			expect(capabilities).toContain("You have access to a limited set of tools for this mode")
-			expect(capabilities).not.toContain("You have access to tools that let you")
+			expect(capabilities).toContain("tools explicitly provided in your active tool definitions")
 			// A control-only set must never advertise tool-execution clauses.
 			expect(capabilities).not.toContain("execute CLI commands")
 			expect(capabilities).not.toContain("regex search")
@@ -773,15 +776,14 @@ describe("SYSTEM_PROMPT", () => {
 			expect(capabilities).not.toContain("execute CLI commands")
 		})
 
-		it("modelInfo.excludedTools removes the matching capability clause", async () => {
+		it("modelInfo.excludedTools does not change generic capability wording", async () => {
 			const prompt = await run("code", {
 				modelInfo: { contextWindow: 100_000, supportsPromptCache: true, excludedTools: ["read_file"] },
 			})
 			const capabilities = extractSection(prompt, "CAPABILITIES")
 
 			expect(capabilities).not.toContain("read files")
-			// other clauses survive, proving the exclusion is scoped to the one tool
-			expect(capabilities).toContain("execute CLI commands")
+			expect(capabilities).toContain("tools explicitly provided in your active tool definitions")
 		})
 	})
 

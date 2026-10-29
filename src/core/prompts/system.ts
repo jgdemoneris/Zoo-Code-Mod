@@ -89,7 +89,7 @@ async function generatePrompt(
 	})
 
 	const [modesSection, skillsSection] = await Promise.all([
-		getModesSection(context),
+		mode === "orchestrator" ? getModesSection(context) : Promise.resolve(""),
 		getSkillsSection(skillsManager, mode as string, policy),
 	])
 

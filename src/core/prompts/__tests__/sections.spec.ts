@@ -97,43 +97,30 @@ describe("addCustomInstructions", () => {
 })
 
 describe("getCapabilitiesSection", () => {
-	it("includes standard clauses for a full-tool mode", () => {
+	it("refers to active tool definitions without enumerating tools", () => {
 		const result = getCapabilitiesSection(policyFor(["read", "edit", "command"]))
 
 		expect(result).toContain("CAPABILITIES")
-		expect(result).toContain("execute CLI commands on the user's computer")
-		expect(result).toContain("list files")
-		expect(result).toContain("read files")
-		expect(result).toContain("write and edit files")
-		// the task tail is a plain sentence — assert no over-claiming enumeration
-		expect(result).not.toContain("such as writing code")
+		expect(result).toContain("tools explicitly provided in your active tool definitions for this mode")
+		expect(result).not.toContain("execute CLI commands")
+		expect(result).not.toContain("read files")
 	})
 
-	it("uses the fallback sentence when zero per-tool clauses exist", () => {
-		// control-tools-only mode: only switch_mode/new_task remain (no read/edit/command clauses)
+	it("uses the same tool-definition wording for a control-tools-only mode", () => {
 		const result = getCapabilitiesSection(policyFor(["modes"]))
 
-		expect(result).toContain("You have access to a limited set of tools for this mode")
-		expect(result).not.toContain("You have access to tools that let you")
+		expect(result).toContain("tools explicitly provided in your active tool definitions for this mode")
 	})
 
-	it("emits the edit-restriction suffix when the mode declares a fileRegex", () => {
+	it("does not restate edit restrictions enforced by tools", () => {
 		const result = getCapabilitiesSection(
 			policyFor(["read", ["edit", { fileRegex: "\\.md$", description: "Markdown files only" }]]),
 		)
 
-		expect(result).toContain("only files matching")
-		expect(result).toContain("\\.md$")
-		expect(result).toContain("Markdown files only")
-		// The suffix binds to the capability sentence, not the last emitted bullet.
-		expect(result).toContain(
-			"You have access to tools that let you list files, regex search, read files, write and edit files. (in this mode only files matching '\\.md$' can be edited — Markdown files only)",
-		)
+		expect(result).not.toContain("only files matching")
 	})
 
 	it("keeps the edit-restriction suffix off the MCP bullet when MCP is active", () => {
-		// With the mcp group + an enabled MCP server the MCP bullet is the last
-		// bullet; the restriction suffix must stay on the capability sentence.
 		const result = getCapabilitiesSection(
 			policyFor(["read", ["edit", { fileRegex: "\\.md$" }], "mcp"], {
 				mcpHub: makeMcpHub([{ name: "s", tools: [{ name: "t", description: "d" }] }]),
@@ -141,13 +128,7 @@ describe("getCapabilitiesSection", () => {
 		)
 
 		expect(result).toContain("MCP servers")
-		expect(result).not.toContain("accomplish tasks more effectively. (in this mode")
-		expect(result).toContain("write and edit files. (in this mode only files matching")
-		// This is the only fixture whose restriction carries no description, so the
-		// empty description-suffix branch must render nothing. "Stryker was here"
-		// (no trailing !) covers both the StringLiteral and ArrayDeclaration
-		// sentinel replacements Stryker injects.
-		expect(result).not.toContain("Stryker was here")
+		expect(result).not.toContain("only files matching")
 	})
 
 	it("omits the edit-restriction suffix without a fileRegex", () => {
@@ -162,10 +143,7 @@ describe("getCapabilitiesSection", () => {
 		expect(result).not.toContain("only files matching")
 	})
 
-	it("keeps the capability clause and restriction for a model-included standalone edit tool", () => {
-		// The restricted edit group's default edit tools are disabled, but the
-		// model catalog re-adds the standalone `edit` tool: it is still an edit
-		// capability, so the clause and the file restriction both render.
+	it("does not enumerate model-included tools", () => {
 		const result = getCapabilitiesSection(
 			policyFor([["edit", { fileRegex: "\\.md$", description: "Markdown files only" }]], {
 				disabledTools: ["write_to_file", "apply_diff"],
@@ -173,23 +151,20 @@ describe("getCapabilitiesSection", () => {
 			}),
 		)
 
-		expect(result).toContain("write and edit files")
-		expect(result).toContain("(in this mode only files matching '\\.md$' can be edited — Markdown files only)")
+		expect(result).toContain("tools explicitly provided in your active tool definitions for this mode")
 	})
 
-	it("lists files guidance only when list_files is available", () => {
+	it("does not duplicate tool-specific usage guidance", () => {
 		const withListFiles = getCapabilitiesSection(policyFor(["read"]))
-		expect(withListFiles).toContain("you can use the list_files tool")
-		// the file-tree *fact* lives in SYSTEM INFORMATION, not CAPABILITIES
-		expect(withListFiles).not.toContain("a recursive list of all filepaths")
+		expect(withListFiles).not.toContain("you can use the list_files tool")
 
 		const withoutListFiles = getCapabilitiesSection(policyFor(["command"]))
-		expect(withoutListFiles).not.toContain("you can use the list_files tool")
+		expect(withoutListFiles).not.toContain("execute_command tool")
 	})
 
-	it("only emits the execute_command paragraph when execute_command is available", () => {
+	it("does not enumerate execute_command usage", () => {
 		const withCmd = getCapabilitiesSection(policyFor(["command"]))
-		expect(withCmd).toContain("You can use the execute_command tool")
+		expect(withCmd).not.toContain("You can use the execute_command tool")
 
 		const withoutCmd = getCapabilitiesSection(policyFor(["read"]))
 		expect(withoutCmd).not.toContain("You can use the execute_command tool")
@@ -261,153 +236,15 @@ describe("getRulesSection", () => {
 		newTaskRequireTodos: false,
 	}
 
-	it("includes standard rules", () => {
+	it("contains concise workspace invariants without duplicating the workspace path", () => {
 		const result = getRulesSection(cwd, settings, policyFor(["read", "edit", "command"]))
 
 		expect(result).toContain("RULES")
-		expect(result).toContain("project base directory")
-		expect(result).toContain(cwd)
-	})
-
-	it("includes vendor confidentiality section when isStealthModel is true", () => {
-		const stealthSettings = { ...settings, isStealthModel: true }
-		const result = getRulesSection(cwd, stealthSettings, policyFor(["read", "edit", "command"]))
-
-		expect(result).toContain("VENDOR CONFIDENTIALITY")
-		expect(result).toContain("Never reveal the vendor or company that created you")
-		expect(result).toContain("I was created by a team of developers")
-		expect(result).toContain("I'm an open-source project maintained by contributors")
-		expect(result).toContain("I don't have information about specific vendors")
-	})
-
-	it("excludes vendor confidentiality section when isStealthModel is false", () => {
-		const stealthSettings = { ...settings, isStealthModel: false }
-		const result = getRulesSection(cwd, stealthSettings, policyFor(["read", "edit", "command"]))
-
-		expect(result).not.toContain("VENDOR CONFIDENTIALITY")
-		expect(result).not.toContain("Never reveal the vendor or company")
-	})
-
-	it("excludes vendor confidentiality section when isStealthModel is undefined", () => {
-		const result = getRulesSection(cwd, settings, policyFor(["read", "edit", "command"]))
-
-		expect(result).not.toContain("VENDOR CONFIDENTIALITY")
-		expect(result).not.toContain("Never reveal the vendor or company")
-	})
-
-	it("omits the execute_command bullet when execute_command is absent", () => {
-		const result = getRulesSection(cwd, settings, policyFor(["read"]))
-
-		expect(result).not.toContain("Before using the execute_command tool")
-		expect(result).not.toContain("Actively Running Terminals")
-		// the terminal-aware "working directory" clause is gone too
-		expect(result).not.toContain("commands may change directories in terminals")
-		// but the base path rule stays
-		expect(result).toContain("All file paths must be relative to this directory")
-	})
-
-	it("includes the execute_command bullet when execute_command is present", () => {
-		const result = getRulesSection(cwd, settings, policyFor(["command"]))
-
-		expect(result).toContain("Before using the execute_command tool")
-		expect(result).toContain("Actively Running Terminals")
-	})
-
-	it("uses ask_followup_question when the tool is available", () => {
-		const result = getRulesSection(cwd, settings, policyFor(["read"]))
-		expect(result).toContain("ask the user questions using the ask_followup_question tool")
-	})
-
-	it("uses the replacement bullet when ask_followup_question is absent", () => {
-		// Both sub-cases — list_files present and list_files absent — take the single
-		// best-effort replacement bullet, emitted exactly when ask_followup_question is absent.
-		const withListFiles = getRulesSection(
-			cwd,
-			settings,
-			policyFor(["read"], { disabledTools: ["ask_followup_question"] }),
-		)
-		expect(withListFiles).toContain("Provide your best-effort result and state your assumptions")
-		expect(withListFiles).not.toContain(
-			"You are only allowed to ask the user questions using the ask_followup_question tool",
-		)
-		expect(withListFiles).not.toContain("enumerate the filesystem yourself")
-
-		const withoutListFiles = getRulesSection(
-			cwd,
-			settings,
-			policyFor(["edit", "command"], { disabledTools: ["ask_followup_question", "list_files"] }),
-		)
-		expect(withoutListFiles).toContain("Provide your best-effort result and state your assumptions")
-		expect(withoutListFiles).not.toContain(
-			"You are only allowed to ask the user questions using the ask_followup_question tool",
-		)
-		expect(withoutListFiles).not.toContain("enumerate the filesystem yourself")
-	})
-
-	it("uses the fallback phrasing in the terminal-output rule when ask_followup_question is absent", () => {
-		// The execute_command bullet is always present, but its tail must not reference a disabled tool.
-		const withoutAsk = getRulesSection(
-			cwd,
-			settings,
-			policyFor(["command"], { disabledTools: ["ask_followup_question"] }),
-		)
-		expect(withoutAsk).toContain("When executing commands")
-		expect(withoutAsk).toContain("note what you expected and proceed with the task, stating your assumptions")
-		expect(withoutAsk).not.toContain("ask_followup_question")
-
-		const withAsk = getRulesSection(cwd, settings, policyFor(["command"]))
-		expect(withAsk).toContain(
-			"use the ask_followup_question tool to request the user to copy and paste it back to you",
-		)
-	})
-
-	it("omits the read_file rule when read_file is absent", () => {
-		const result = getRulesSection(cwd, settings, policyFor(["command"]))
-		expect(result).not.toContain("The user may provide a file's contents directly")
-	})
-
-	it("includes the read_file rule when read_file is present", () => {
-		const result = getRulesSection(cwd, settings, policyFor(["read"]))
-		expect(result).toContain("The user may provide a file's contents directly")
-	})
-
-	it("keeps a stable RULES baseline", () => {
-		// duplicate guard: ensure the describe still asserts a stable baseline even if other tests change
-		const result = getRulesSection(cwd, settings, policyFor(["read", "edit", "command"]))
-		expect(result).toContain("RULES")
-	})
-
-	it("uses tool-neutral completion guidance when attempt_completion is unavailable", () => {
-		const rawPolicy: EffectiveToolPolicy = {
-			tools: new Set<string>(["read_file"]),
-			hasMcpGroup: false,
-			hasMcpTools: false,
-			hasMcpResources: false,
-		}
-
-		expect(rawPolicy.tools.has("attempt_completion")).toBe(false)
-		const result = getRulesSection(cwd, settings, rawPolicy)
-		expect(result).not.toContain("attempt_completion")
-		expect(result).toContain("present the result to the user")
-	})
-
-	it("only emits file-restriction guidance for an effective restricted edit tool", () => {
-		const restricted = policyFor([["edit", { fileRegex: "\\.md$" }]])
-		expect(getRulesSection(cwd, settings, restricted)).toContain("FileRestrictionError")
-
-		const disabled = policyFor([["edit", { fileRegex: "\\.md$" }]], {
-			disabledTools: ["write_to_file", "apply_diff"],
-		})
-		expect(getRulesSection(cwd, settings, disabled)).not.toContain("FileRestrictionError")
-	})
-
-	it.each([
-		["tools", makeMcpHub([{ name: "s", tools: [{ name: "t" }] }]), true],
-		["resources", makeMcpHub([{ name: "s", resources: [{ uri: "r", name: "r" }] }]), true],
-		["neither", makeMcpHub([{ name: "s" }]), false],
-	] as const)("gates MCP rules for a hub with %s", (_case, mcpHub, expected) => {
-		const result = getRulesSection(cwd, settings, policyFor(["mcp"], { mcpHub }))
-		expect(result.includes("MCP operations should be used one at a time")).toBe(expected)
+		expect(result).toContain("Current Working Directory defined in SYSTEM INFORMATION")
+		expect(result).not.toContain(cwd)
+		expect(result).toContain("pass the target path via the `cwd` parameter")
+		expect(result).toContain("Inspect target files or symbol definitions")
+		expect(result).toContain("Respond directly with technical substance")
 	})
 })
 
@@ -450,17 +287,8 @@ describe("getSystemInfoSection", () => {
 })
 
 describe("getObjectiveSection", () => {
-	it("names ask_followup_question when the tool is available", () => {
-		const result = getObjectiveSection(policyFor(["read"]))
-		expect(result).toContain("ask the user to provide the missing parameters using the ask_followup_question tool")
-	})
-
-	it("uses best-effort phrasing when ask_followup_question is absent", () => {
-		const result = getObjectiveSection(
-			policyFor(["read", "edit", "command"], { disabledTools: ["ask_followup_question"] }),
-		)
-		expect(result).toContain("state your assumptions and proceed with the best available value")
-		expect(result).not.toContain("ask the user to provide the missing parameters")
+	it("returns an empty string", () => {
+		expect(getObjectiveSection(policyFor(["read"]))).toBe("")
 	})
 })
 
@@ -531,83 +359,5 @@ describe("getCommandChainOperator", () => {
 	it("returns && for WSL bash", () => {
 		vi.spyOn(shellUtils, "getShell").mockReturnValue("/bin/bash")
 		expect(getCommandChainOperator()).toBe("&&")
-	})
-})
-
-describe("getRulesSection shell-aware command chaining", () => {
-	const cwd = "/test/path"
-	const settings = { todoListEnabled: true, useAgentRules: true, newTaskRequireTodos: false }
-
-	const codePolicy = policyFor(["read", "edit", "command"])
-
-	afterEach(() => {
-		vi.restoreAllMocks()
-	})
-
-	it("uses && for Unix shells in command chaining example", () => {
-		vi.spyOn(shellUtils, "getShell").mockReturnValue("/bin/bash")
-		const result = getRulesSection(cwd, settings, codePolicy)
-
-		expect(result).toContain("cd (path to project) && (command")
-		expect(result).not.toContain("cd (path to project) ; (command")
-		expect(result).not.toContain("cd (path to project) & (command")
-	})
-
-	it("uses ; for PowerShell in command chaining example", () => {
-		vi.spyOn(shellUtils, "getShell").mockReturnValue(
-			"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-		)
-		const result = getRulesSection(cwd, settings, codePolicy)
-
-		expect(result).toContain("cd (path to project) ; (command")
-		expect(result).toContain("Note: Using `;` for PowerShell command chaining")
-	})
-
-	it("uses && for cmd.exe in command chaining example", () => {
-		vi.spyOn(shellUtils, "getShell").mockReturnValue("C:\\Windows\\System32\\cmd.exe")
-		const result = getRulesSection(cwd, settings, codePolicy)
-
-		expect(result).toContain("cd (path to project) && (command")
-		expect(result).toContain("Note: Using `&&` for cmd.exe command chaining")
-	})
-
-	it("includes Unix utility guidance for PowerShell", () => {
-		vi.spyOn(shellUtils, "getShell").mockReturnValue(
-			"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-		)
-		const result = getRulesSection(cwd, settings, codePolicy)
-
-		expect(result).toContain("IMPORTANT: When using PowerShell, avoid Unix-specific utilities")
-		expect(result).toContain("`sed`, `grep`, `awk`, `cat`, `rm`, `cp`, `mv`")
-		expect(result).toContain("`Select-String` for grep")
-		expect(result).toContain("`Get-Content` for cat")
-		expect(result).toContain("PowerShell's `-replace` operator")
-	})
-
-	it("includes Unix utility guidance for cmd.exe", () => {
-		vi.spyOn(shellUtils, "getShell").mockReturnValue("C:\\Windows\\System32\\cmd.exe")
-		const result = getRulesSection(cwd, settings, codePolicy)
-
-		expect(result).toContain("IMPORTANT: When using cmd.exe, avoid Unix-specific utilities")
-		expect(result).toContain("`sed`, `grep`, `awk`, `cat`, `rm`, `cp`, `mv`")
-		expect(result).toContain("`type` for cat")
-		expect(result).toContain("`del` for rm")
-		expect(result).toContain("`find`/`findstr` for grep")
-	})
-
-	it("does not include Unix utility guidance for Unix shells", () => {
-		vi.spyOn(shellUtils, "getShell").mockReturnValue("/bin/bash")
-		const result = getRulesSection(cwd, settings, codePolicy)
-
-		expect(result).not.toContain("IMPORTANT: When using PowerShell")
-		expect(result).not.toContain("IMPORTANT: When using cmd.exe")
-		expect(result).not.toContain("`Select-String` for grep")
-	})
-
-	it("does not include note for Unix shells", () => {
-		vi.spyOn(shellUtils, "getShell").mockReturnValue("/bin/zsh")
-		const result = getRulesSection(cwd, settings, codePolicy)
-
-		expect(result).not.toContain("Note: Using")
 	})
 })

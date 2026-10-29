@@ -443,8 +443,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
 					enterBehavior: enterBehavior ?? "send",
-					includeCurrentTime: includeCurrentTime ?? true,
-					includeCurrentCost: includeCurrentCost ?? true,
+					includeCurrentTime: includeCurrentTime ?? false,
+					includeCurrentCost: includeCurrentCost ?? false,
 					maxGitStatusFiles: maxGitStatusFiles ?? 0,
 					autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 					autoCloseZooOpenedFilesAfterUserEdited:

@@ -9,7 +9,9 @@ import {
 	type ProviderSettings,
 	isDynamicProvider,
 	isRetiredProvider,
+	openAiEndpointModeSchema,
 	providerIdentifiers,
+	supportsOpenAiEndpointModeSelection,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -461,6 +463,28 @@ const ApiOptions = ({
 					data-testid="provider-select"
 				/>
 			</div>
+
+			{selectedProvider && supportsOpenAiEndpointModeSelection(selectedProvider) && (
+				<div className="flex flex-col gap-1">
+					<label className="block font-medium">{t("settings:providers.apiProtocol")}</label>
+					<Select
+						value={apiConfiguration.openAiEndpointMode ?? "chat-completions"}
+						onValueChange={(value) =>
+							setApiConfigurationField("openAiEndpointMode", openAiEndpointModeSchema.parse(value))
+						}>
+						<SelectTrigger className="w-full" data-testid="api-protocol-select">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="chat-completions">{t("settings:providers.chatCompletions")}</SelectItem>
+							<SelectItem value="responses">{t("settings:providers.responsesApi")}</SelectItem>
+						</SelectContent>
+					</Select>
+					<p className="text-sm text-vscode-descriptionForeground">
+						{t("settings:providers.apiProtocolDescription")}
+					</p>
+				</div>
+			)}
 
 			{errorMessage && <ApiErrorMessage errorMessage={errorMessage} />}
 

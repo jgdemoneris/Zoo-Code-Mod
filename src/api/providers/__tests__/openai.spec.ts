@@ -23,6 +23,7 @@ vitest.mock("../utils/timeout-config", () => ({
 const MOCK_TIMEOUT_MS = 300_000
 
 const mockCreate = vitest.fn()
+const mockResponsesCreate = vitest.fn()
 
 vitest.mock("openai", () => {
 	const mockConstructor = vitest.fn()
@@ -31,6 +32,15 @@ vitest.mock("openai", () => {
 		__esModule: true,
 		default: mockConstructor.mockImplementation(function () {
 			return {
+				responses: {
+					create: mockResponsesCreate.mockImplementation(async (options) => {
+						if (!options.stream) return { output_text: "Test response" }
+						return asyncStreamFrom([
+							{ type: "response.output_text.delta", delta: "Test response" },
+							{ type: "response.completed", response: { usage: { input_tokens: 10, output_tokens: 5 } } },
+						])
+					}),
+				},
 				chat: {
 					completions: {
 						create: mockCreate.mockImplementation(async (options) => {
@@ -104,6 +114,7 @@ describe("OpenAiHandler", () => {
 		})
 		handler = new OpenAiHandler(mockOptions)
 		mockCreate.mockClear()
+		mockResponsesCreate.mockClear()
 	})
 
 	describe("constructor", () => {
@@ -200,6 +211,146 @@ describe("OpenAiHandler", () => {
 				],
 			},
 		]
+
+		it("uses Responses with transformed history and flattened tools when selected", async () => {
+			const responsesHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiEndpointMode: "responses",
+				openAiExtraBody: JSON.stringify({ service_tier: "flex" }),
+			})
+			const metadata = makeCreateMessageMetadata()
+			await collectStream(responsesHandler.createMessage(systemPrompt, messages, metadata))
+
+			expect(mockResponsesCreate).toHaveBeenCalledOnce()
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockResponsesCreate.mock.calls[0][0]).toMatchObject({
+				model: "gpt-4",
+				instructions: systemPrompt,
+				input: [{ role: "user", content: [{ type: "input_text", text: "Hello!" }] }],
+				stream: true,
+				service_tier: "flex",
+			})
+			expect(OpenAI).toHaveBeenCalledWith(
+				expect.objectContaining({ baseURL: "https://api.openai.com/v1", apiKey: "test-api-key" }),
+			)
+		})
+
+		it("gates Responses max_output_tokens on includeMaxTokens", async () => {
+			const responsesHandler = new OpenAiHandler({ ...mockOptions, openAiEndpointMode: "responses" })
+			await collectStream(responsesHandler.createMessage(systemPrompt, messages))
+			expect(mockResponsesCreate.mock.calls[0][0]).not.toHaveProperty("max_output_tokens")
+
+			mockResponsesCreate.mockClear()
+			const enabledHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiEndpointMode: "responses",
+				includeMaxTokens: true,
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, maxTokens: -1 },
+			})
+			await collectStream(enabledHandler.createMessage(systemPrompt, messages))
+			expect(mockResponsesCreate.mock.calls[0][0]).not.toHaveProperty("max_output_tokens")
+		})
+
+		it("uses the resolved custom-model reasoning effort in Responses mode", async () => {
+			const responsesHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiEndpointMode: "responses",
+				enableReasoningEffort: true,
+				reasoningEffort: "low",
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "high" },
+			})
+			await collectStream(responsesHandler.createMessage(systemPrompt, messages))
+			expect(mockResponsesCreate.mock.calls[0][0]).toMatchObject({ reasoning: { effort: "high" } })
+		})
+
+		it("keeps unverified OpenAiHandler subclasses on Chat Completions", async () => {
+			class UnverifiedHandler extends OpenAiHandler {}
+			const unverified = new UnverifiedHandler({ ...mockOptions, openAiEndpointMode: "responses" })
+			await collectStream(unverified.createMessage(systemPrompt, messages))
+			expect(mockResponsesCreate).not.toHaveBeenCalled()
+			expect(mockCreate).toHaveBeenCalledOnce()
+		})
+
+		it("rejects Responses for Azure endpoints instead of falling back", async () => {
+			const azureHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiUseAzure: true,
+				openAiEndpointMode: "responses",
+			})
+			await expect(collectStream(azureHandler.createMessage(systemPrompt, messages))).rejects.toThrow(
+				"Responses API is not enabled for Azure",
+			)
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockResponsesCreate).not.toHaveBeenCalled()
+		})
+
+		it("does not fall back to Chat Completions when Responses fails", async () => {
+			mockResponsesCreate.mockRejectedValueOnce(new Error("Responses endpoint unavailable"))
+			const responsesHandler = new OpenAiHandler({ ...mockOptions, openAiEndpointMode: "responses" })
+			await expect(collectStream(responsesHandler.createMessage(systemPrompt, messages))).rejects.toThrow(
+				"Responses endpoint unavailable",
+			)
+			expect(mockResponsesCreate).toHaveBeenCalledOnce()
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("continues after a Responses function call and submits its tool result", async () => {
+			mockResponsesCreate
+				.mockImplementationOnce(async () =>
+					asyncStreamFrom([
+						{
+							type: "response.output_item.done",
+							output_index: 0,
+							item: {
+								type: "function_call",
+								call_id: "call_weather",
+								name: "get_weather",
+								arguments: '{"city":"Paris"}',
+							},
+						},
+					]),
+				)
+				.mockImplementationOnce(async () =>
+					asyncStreamFrom([{ type: "response.output_text.delta", delta: "It is sunny." }]),
+				)
+			const responsesHandler = new OpenAiHandler({ ...mockOptions, openAiEndpointMode: "responses" })
+			const firstTurn = await collectStream(
+				responsesHandler.createMessage(systemPrompt, messages, makeCreateMessageMetadata()),
+			)
+			expect(firstTurn).toContainEqual({
+				type: "tool_call",
+				id: "call_weather",
+				name: "get_weather",
+				arguments: '{"city":"Paris"}',
+			})
+
+			const nextMessages: Anthropic.Messages.MessageParam[] = [
+				...messages,
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call_weather", name: "get_weather", input: { city: "Paris" } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "call_weather", content: "Sunny, 22C" }],
+				},
+			]
+			const secondTurn = await collectStream(
+				responsesHandler.createMessage(systemPrompt, nextMessages, makeCreateMessageMetadata()),
+			)
+			expect(secondTurn).toContainEqual({ type: "text", text: "It is sunny." })
+			expect(mockResponsesCreate).toHaveBeenCalledTimes(2)
+			expect(mockResponsesCreate.mock.calls[1][0].input).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ type: "function_call", call_id: "call_weather" }),
+					expect.objectContaining({
+						type: "function_call_output",
+						call_id: "call_weather",
+						output: "Sunny, 22C",
+					}),
+				]),
+			)
+		})
 
 		it("should handle non-streaming mode", async () => {
 			const handler = new OpenAiHandler({
@@ -942,6 +1093,18 @@ describe("OpenAiHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("uses the Responses endpoint when selected", async () => {
+			const responsesHandler = new OpenAiHandler({ ...mockOptions, openAiEndpointMode: "responses" })
+			expect(await responsesHandler.completePrompt("Test prompt")).toBe("Test response")
+			expect(mockResponsesCreate).toHaveBeenCalledOnce()
+			expect(mockResponsesCreate.mock.calls[0][0]).toMatchObject({
+				model: "gpt-4",
+				input: [{ role: "user", content: [{ type: "input_text", text: "Test prompt" }] }],
+				stream: false,
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")

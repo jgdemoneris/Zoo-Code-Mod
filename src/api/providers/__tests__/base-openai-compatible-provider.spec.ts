@@ -10,11 +10,15 @@ import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
+const mockResponsesCreate = vi.fn()
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
 	default: vi.fn(function () {
 		return {
+			responses: {
+				create: mockResponsesCreate,
+			},
 			chat: {
 				completions: {
 					create: mockCreate,
@@ -35,7 +39,15 @@ const TEST_MODEL_INFO: ModelInfo = {
 
 // Create a concrete test implementation of the abstract base class
 class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-model"> {
-	constructor(apiKey: string, options?: { apiModelId?: string; modelMaxTokens?: number }) {
+	constructor(
+		apiKey: string,
+		options?: {
+			apiModelId?: string
+			modelMaxTokens?: number
+			modelTemperature?: number
+			openAiEndpointMode?: "chat-completions" | "responses"
+		},
+	) {
 		const testModels: Record<"test-model", ModelInfo> = {
 			"test-model": TEST_MODEL_INFO,
 		}
@@ -51,11 +63,18 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 	}
 }
 
+class ResponsesEnabledTestProvider extends TestOpenAiCompatibleProvider {
+	protected override supportsResponses(): boolean {
+		return true
+	}
+}
+
 describe("BaseOpenAiCompatibleProvider", () => {
 	let handler: TestOpenAiCompatibleProvider
 
 	beforeEach(() => {
 		clearAllMocks()
+		mockResponsesCreate.mockReset()
 		handler = new TestOpenAiCompatibleProvider("test-api-key")
 	})
 
@@ -296,6 +315,80 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			expect(firstChunk.done).toBe(false)
 			expect(firstChunk.value).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 50 })
+		})
+
+		it("keeps unverified subclasses on Chat Completions when Responses is selected", async () => {
+			const unverifiedHandler = new TestOpenAiCompatibleProvider("test-api-key", {
+				openAiEndpointMode: "responses",
+			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			await collectStream(unverifiedHandler.createMessage("system prompt", []))
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "chat completion" } }] })
+			await expect(unverifiedHandler.completePrompt("hello")).resolves.toBe("chat completion")
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			expect(mockResponsesCreate).not.toHaveBeenCalled()
+		})
+
+		it("uses Responses for opted-in subclasses and forwards tools and capabilities", async () => {
+			const responsesHandler = new ResponsesEnabledTestProvider("test-api-key", {
+				openAiEndpointMode: "responses",
+				modelTemperature: 0.25,
+			})
+			mockResponsesCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{ type: "response.output_text.delta", delta: "response stream" },
+					{
+						type: "response.completed",
+						response: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 4,
+								output_tokens_details: { reasoning_tokens: 2 },
+							},
+						},
+					},
+				]),
+			)
+
+			const chunks = await collectStream(
+				responsesHandler.createMessage("system instructions", [{ role: "user", content: "hello" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "lookup",
+								description: "Find a value",
+								parameters: { type: "object", properties: {} },
+							},
+						},
+					],
+				}),
+			)
+
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockResponsesCreate).toHaveBeenCalledOnce()
+			expect(mockResponsesCreate.mock.calls[0][0]).toMatchObject({
+				model: "test-model",
+				instructions: "system instructions",
+				stream: true,
+				temperature: 0.25,
+				tools: [{ type: "function", name: "lookup", description: "Find a value" }],
+			})
+			expect(chunks).toContainEqual({ type: "text", text: "response stream" })
+			expect(chunks).toContainEqual(
+				expect.objectContaining({ type: "usage", inputTokens: 10, outputTokens: 4, reasoningTokens: 2 }),
+			)
+
+			mockResponsesCreate.mockResolvedValueOnce({ output_text: "response completion" })
+			await expect(responsesHandler.completePrompt("prompt")).resolves.toBe("response completion")
+			expect(mockResponsesCreate.mock.calls[1][0]).toMatchObject({
+				model: "test-model",
+				input: [{ role: "user", content: [{ type: "input_text", text: "prompt" }] }],
+				stream: false,
+			})
 		})
 	})
 

@@ -195,6 +195,23 @@ describe("convertToResponsesApiInput", () => {
 	})
 
 	describe("assistant messages with content blocks", () => {
+		it("preserves Zoo Code reasoning blocks as sanitized output_text", () => {
+			const messages = [
+				{
+					role: "assistant",
+					content: [{ type: "reasoning", text: "Reasoning \uD800 detail" }],
+				},
+			] as unknown as Anthropic.Messages.MessageParam[]
+
+			expect(convertToResponsesApiInput(messages)).toEqual([
+				{
+					type: "message",
+					role: "assistant",
+					content: [{ type: "output_text", text: "[Thinking] Reasoning � detail" }],
+				},
+			])
+		})
+
 		it("should convert text blocks to output_text messages", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{
@@ -298,6 +315,62 @@ describe("convertToResponsesApiInput", () => {
 					name: "read_file",
 				}),
 			)
+		})
+
+		it("preserves base64 images and explicitly serializes other result blocks", () => {
+			const result = convertToResponsesApiInput([
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "call-image",
+							content: [
+								{ type: "text", text: "output" },
+								{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+								// Structural double models an unsupported block variant to verify explicit serialization.
+								{ type: "custom", value: "kept" } as unknown as Anthropic.TextBlockParam,
+							],
+						},
+					],
+				},
+			])
+			expect(result[0]).toEqual({
+				type: "function_call_output",
+				call_id: "call-image",
+				output: [
+					{ type: "input_text", text: "output" },
+					{ type: "input_image", detail: "auto", image_url: "data:image/png;base64,abc" },
+					{ type: "input_text", text: '{"type":"custom","value":"kept"}' },
+				],
+			})
+		})
+
+		it("preserves the order of interleaved text and multiple function calls", () => {
+			const result = convertToResponsesApiInput([
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "first" },
+						{ type: "tool_use", id: "call-1", name: "one", input: { n: 1 } },
+						{ type: "text", text: "second" },
+						{ type: "tool_use", id: "call-2", name: "two", input: { n: 2 } },
+					],
+				},
+			])
+			expect(result.map((item) => (item.type === "message" ? item.content[0].text : item.type))).toEqual([
+				"first",
+				"function_call",
+				"second",
+				"function_call",
+			])
+			expect(result[1].call_id).toBe("call-1")
+			expect(result[3].call_id).toBe("call-2")
+		})
+
+		it("sanitizes lone surrogates while retaining valid Unicode", () => {
+			const result = convertToResponsesApiInput([{ role: "user", content: "emoji 😀 and lone \uD800" }])
+			expect(result[0].content[0].text).toBe("emoji 😀 and lone �")
 		})
 	})
 

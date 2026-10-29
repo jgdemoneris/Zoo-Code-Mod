@@ -1,11 +1,24 @@
 import { z } from "zod"
 
 import { reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
-import type { ProviderIdentifier } from "../provider-identifiers.js"
+import { providerIdentifiers, type ProviderIdentifier } from "../provider-identifiers.js"
 
 export const API_PROVIDER_FIELD = "apiProvider"
 export const SETTINGS_SHAPE_FIELD = "settingsShape"
 export const API_MODEL_ID_FIELD = "apiModelId"
+
+export const OPEN_AI_ENDPOINT_MODES = ["chat-completions", "responses"] as const
+export const openAiEndpointModeSchema = z.enum(OPEN_AI_ENDPOINT_MODES)
+export type OpenAiEndpointMode = z.infer<typeof openAiEndpointModeSchema>
+export const DEFAULT_OPEN_AI_ENDPOINT_MODE: OpenAiEndpointMode = "chat-completions"
+
+export const selectableProviders = [providerIdentifiers.openai] as const
+
+export const supportsOpenAiEndpointModeSelection = (provider: string): boolean =>
+	(selectableProviders as readonly string[]).includes(provider)
+
+export const resolveOpenAiEndpointMode = (mode?: OpenAiEndpointMode): OpenAiEndpointMode =>
+	mode ?? DEFAULT_OPEN_AI_ENDPOINT_MODE
 
 // Treat a persisted `null` as an unset value. Previously persisted or imported
 // profiles may store `null` for these fields; converting `null` to `undefined`
@@ -22,6 +35,7 @@ const nullableOptional = <Schema extends z.ZodTypeAny>(schema: Schema) =>
 	>
 
 export const baseProviderSettingsShape = {
+	openAiEndpointMode: openAiEndpointModeSchema.optional(),
 	includeMaxTokens: z.boolean().optional(),
 	todoListEnabled: z.boolean().optional(),
 	modelTemperature: z.number().nullish(),

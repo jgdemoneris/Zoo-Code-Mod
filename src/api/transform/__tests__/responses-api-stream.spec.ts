@@ -321,6 +321,97 @@ describe("processResponsesApiStream", () => {
 		})
 	})
 
+	describe("function identity tracking and terminal events", () => {
+		it("uses identity from output_item.added when argument deltas omit it", async () => {
+			const chunks = await collectChunks(
+				processResponsesApiStream(
+					mockStream([
+						{
+							type: "response.output_item.added",
+							output_index: 2,
+							item: { type: "function_call", id: "item-1", call_id: "call-1", name: "run" },
+						},
+						{
+							type: "response.function_call_arguments.delta",
+							item_id: "item-1",
+							output_index: 2,
+							delta: "{}",
+						},
+						{
+							type: "response.function_call_arguments.done",
+							item_id: "item-1",
+							output_index: 2,
+							arguments: "{}",
+						},
+						{
+							type: "response.output_item.done",
+							output_index: 2,
+							item: {
+								type: "function_call",
+								id: "item-1",
+								call_id: "call-1",
+								name: "run",
+								arguments: "{}",
+							},
+						},
+					]),
+					noopUsage,
+				),
+			)
+			expect(chunks).toEqual([
+				{ type: "tool_call_partial", index: 2, id: "call-1", name: "run", arguments: "{}" },
+			])
+		})
+
+		it("emits final calls once when arguments.done arrives without deltas", async () => {
+			const chunks = await collectChunks(
+				processResponsesApiStream(
+					mockStream([
+						{
+							type: "response.output_item.added",
+							output_index: 0,
+							item: { type: "function_call", call_id: "call-1", name: "run" },
+						},
+						{ type: "response.function_call_arguments.done", call_id: "call-1", arguments: '{"ok":true}' },
+						{
+							type: "response.output_item.done",
+							item: { type: "function_call", call_id: "call-1", name: "run", arguments: '{"ok":true}' },
+						},
+					]),
+					noopUsage,
+				),
+			)
+			expect(chunks).toEqual([{ type: "tool_call", id: "call-1", name: "run", arguments: '{"ok":true}' }])
+		})
+
+		it.each([
+			["response.failed", "Responses API generation failed"],
+			["response.incomplete", "Responses API generation incomplete"],
+		])("propagates %s as a stream error", async (type, message) => {
+			await expect(collectChunks(processResponsesApiStream(mockStream([{ type }]), noopUsage))).rejects.toThrow(
+				message,
+			)
+		})
+
+		it("emits final usage only once across terminal markers", async () => {
+			const normalize = (usage: { input_tokens: number }) => ({
+				type: "usage" as const,
+				inputTokens: usage.input_tokens,
+				outputTokens: 0,
+			})
+			const chunks = await collectChunks(
+				processResponsesApiStream(
+					mockStream([
+						{ type: "response.completed", response: { usage: { input_tokens: 10 } } },
+						{ type: "response.done", response: { usage: { input_tokens: 10 } } },
+					]),
+					normalize,
+				),
+			)
+			expect(chunks).toEqual([{ type: "usage", inputTokens: 10, outputTokens: 0 }])
+		})
+	})
+
 	describe("unknown events", () => {
 		it("should silently ignore unknown event types", async () => {
 			const stream = mockStream([

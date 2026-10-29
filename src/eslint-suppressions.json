@@ -546,7 +546,7 @@
 	},
 	"api/transform/responses-api-input.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 5
 		}
 	},
 	"api/transform/responses-api-stream.ts": {

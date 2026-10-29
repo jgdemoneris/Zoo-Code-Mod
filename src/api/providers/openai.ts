@@ -29,6 +29,7 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { completeResponsesPrompt, createResponsesStream, type ResponsesCapabilities } from "./utils/openai-responses"
 
 type OpenAiUsage =
 	| {
@@ -109,6 +110,27 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
+
+		if (this.shouldUseResponses()) {
+			this.assertResponsesEndpointSupported()
+			try {
+				yield* createResponsesStream({
+					client: this.client,
+					model: this.getModel(),
+					options: this.options,
+					systemPrompt,
+					messages,
+					metadata,
+					capabilities: this.getResponsesCapabilities(),
+					normalizeUsage: (usage) => this.normalizeResponsesUsage(usage, modelInfo),
+					convertToolsForOpenAI: (tools) => this.convertToolsForOpenAI(tools, strictToolSchemas),
+					extraBody: this.extraBody,
+				})
+			} catch (error) {
+				throw handleOpenAIError(error, this.providerName)
+			}
+			return
+		}
 
 		if (modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
@@ -322,6 +344,52 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
+	protected shouldUseResponses(): boolean {
+		return this.constructor === OpenAiHandler && this.options.openAiEndpointMode === "responses"
+	}
+
+	protected getResponsesCapabilities(): ResponsesCapabilities {
+		return {
+			supportsStreaming: true,
+			supportsTools: true,
+			supportsReasoningEffort: true,
+			supportsTemperature: true,
+			supportsMaxOutputTokens: Boolean(this.options.includeMaxTokens),
+			supportsStatefulResponses: false,
+		}
+	}
+
+	protected normalizeResponsesUsage(usage: unknown, modelInfo?: ModelInfo): ApiStreamUsageChunk | undefined {
+		if (!usage || typeof usage !== "object") return undefined
+		const responseUsage = usage as {
+			input_tokens?: number
+			output_tokens?: number
+			input_tokens_details?: { cached_tokens?: number }
+			output_tokens_details?: { reasoning_tokens?: number }
+		}
+		const result = this.processUsageMetrics(
+			{
+				prompt_tokens: responseUsage.input_tokens,
+				completion_tokens: responseUsage.output_tokens,
+				prompt_tokens_details: { cached_tokens: responseUsage.input_tokens_details?.cached_tokens },
+			},
+			modelInfo,
+		)
+		const reasoningTokens = responseUsage.output_tokens_details?.reasoning_tokens
+		return typeof reasoningTokens === "number" ? { ...result, reasoningTokens } : result
+	}
+
+	protected assertResponsesEndpointSupported(): void {
+		if (
+			this._isAzureAiInference(this.options.openAiBaseUrl) ||
+			isAzureOpenAiBaseUrl(this.options.openAiBaseUrl, this.options.openAiUseAzure)
+		) {
+			throw new Error(
+				"The Responses API is not enabled for Azure OpenAI or Azure AI Inference endpoints. Use Chat Completions or configure a verified Responses-compatible endpoint.",
+			)
+		}
+	}
+
 	// Single gate for everything that depends on the R1 request format: message
 	// conversion in createMessage() and reasoning retention in getModel(). Both
 	// must agree, otherwise reasoning is converted for the request but stripped
@@ -356,6 +424,25 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		try {
+			if (this.shouldUseResponses()) {
+				this.assertResponsesEndpointSupported()
+				const model = this.getModel()
+				try {
+					return await completeResponsesPrompt({
+						client: this.client,
+						model,
+						options: this.options,
+						messages: [{ role: "user", content: prompt }],
+						completePromptOptions: _options,
+						capabilities: this.getResponsesCapabilities(),
+						normalizeUsage: (usage) => this.normalizeResponsesUsage(usage, model.info),
+						convertToolsForOpenAI: (tools) => this.convertToolsForOpenAI(tools),
+						extraBody: this.extraBody,
+					})
+				} catch (error) {
+					throw handleOpenAIError(error, this.providerName)
+				}
+			}
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
 			const modelInfo = model.info

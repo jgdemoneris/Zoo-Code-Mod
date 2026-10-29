@@ -1,4 +1,13 @@
-import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
+import {
+	ANTHROPIC_API_PROTOCOL,
+	DEFAULT_OPEN_AI_ENDPOINT_MODE,
+	OPENAI_API_PROTOCOL,
+	providerIdentifiers,
+	providerNames,
+	resolveOpenAiEndpointMode,
+	selectableProviders,
+	supportsOpenAiEndpointModeSelection,
+} from "../index.js"
 import {
 	getApiProtocol,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
@@ -20,6 +29,36 @@ describe("provider settings discriminated union", () => {
 
 	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
 		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+
+	it("accepts optional OpenAI endpoint mode on provider settings", () => {
+		const settings = { apiProvider: providerIdentifiers.openai, openAiEndpointMode: "responses" }
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+		expect(PROVIDER_SETTINGS_KEYS).toContain("openAiEndpointMode")
+		expect(providerSettingsSchemaDiscriminated.parse({ apiProvider: providerIdentifiers.openai })).toEqual({
+			apiProvider: providerIdentifiers.openai,
+		})
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.openai,
+				openAiEndpointMode: "unsupported",
+			}).success,
+		).toBe(false)
+	})
+})
+
+describe("OpenAI endpoint mode eligibility", () => {
+	it("allows only the initially supported providers to select a protocol", () => {
+		expect(selectableProviders).toEqual([providerIdentifiers.openai])
+		expect(supportsOpenAiEndpointModeSelection(providerIdentifiers.openai)).toBe(true)
+		expect(supportsOpenAiEndpointModeSelection(providerIdentifiers.deepseek)).toBe(false)
+		expect(supportsOpenAiEndpointModeSelection(providerIdentifiers.openaiNative)).toBe(false)
+		expect(supportsOpenAiEndpointModeSelection(providerIdentifiers.xai)).toBe(false)
+	})
+
+	it("resolves missing endpoint mode to Chat Completions", () => {
+		expect(resolveOpenAiEndpointMode()).toBe(DEFAULT_OPEN_AI_ENDPOINT_MODE)
+		expect(resolveOpenAiEndpointMode("responses")).toBe("responses")
 	})
 })
 

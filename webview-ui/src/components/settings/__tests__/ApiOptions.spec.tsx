@@ -61,9 +61,9 @@ vi.mock("@/components/ui", () => ({
 			</select>
 		</div>
 	),
-	SelectTrigger: ({ children }: any) => <div className="select-trigger-mock">{children}</div>,
-	SelectValue: ({ children }: any) => <div className="select-value-mock">{children}</div>,
-	SelectContent: ({ children }: any) => <div className="select-content-mock">{children}</div>,
+	SelectTrigger: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+	SelectValue: () => null,
+	SelectContent: ({ children }: any) => <>{children}</>,
 	SelectItem: ({ children, value }: any) => (
 		<option value={value} className="select-item-mock">
 			{children}
@@ -298,6 +298,49 @@ const renderApiOptions = (props: Partial<ApiOptionsProps> = {}) => {
 }
 
 describe("ApiOptions", () => {
+	it.each([providerIdentifiers.openai])(
+		"shows the API Protocol selector directly below API Provider for %s",
+		(apiProvider) => {
+			renderApiOptions({ apiConfiguration: { apiProvider } })
+
+			const providerControl = screen.getByTestId("provider-select")
+			const protocolControl = screen.getByTestId("api-protocol-select")
+			expect(protocolControl).toBeInTheDocument()
+			expect(
+				providerControl.compareDocumentPosition(protocolControl) & Node.DOCUMENT_POSITION_FOLLOWING,
+			).toBeTruthy()
+
+			const protocolSelect = protocolControl.closest(".select-mock")?.querySelector("select")
+			expect(protocolSelect).toHaveValue("chat-completions")
+		},
+	)
+
+	it.each([
+		providerIdentifiers.deepseek,
+		providerIdentifiers.openaiNative,
+		providerIdentifiers.xai,
+		providerIdentifiers.opencodeGo,
+		providerIdentifiers.anthropic,
+	])("hides the API Protocol selector for %s", (apiProvider) => {
+		renderApiOptions({ apiConfiguration: { apiProvider } })
+		expect(screen.queryByTestId("api-protocol-select")).not.toBeInTheDocument()
+	})
+
+	it("updates the endpoint mode when Responses API is selected", () => {
+		const setApiConfigurationField = vi.fn()
+		renderApiOptions({
+			apiConfiguration: { apiProvider: providerIdentifiers.openai },
+			setApiConfigurationField,
+		})
+
+		const protocolControl = screen.getByTestId("api-protocol-select")
+		const protocolSelect = protocolControl.closest(".select-mock")?.querySelector("select")
+		if (!protocolSelect) throw new Error("API Protocol select was not rendered")
+
+		fireEvent.change(protocolSelect, { target: { value: "responses" } })
+		expect(setApiConfigurationField).toHaveBeenCalledWith("openAiEndpointMode", "responses")
+	})
+
 	it("resets model to provider default when switching to openai-codex with an invalid prior apiModelId", () => {
 		const mockSetApiConfigurationField = vi.fn()
 

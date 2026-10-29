@@ -14,6 +14,7 @@ import { BaseProvider } from "./base-provider"
 import { handleOpenAIError } from "./utils/error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { completeResponsesPrompt, createResponsesStream, type ResponsesCapabilities } from "./utils/openai-responses"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -36,6 +37,42 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 	protected readonly options: ApiHandlerOptions
 
 	protected client: OpenAI
+
+	/** Providers must explicitly verify Responses endpoint compatibility before opting in. */
+	protected supportsResponses(): boolean {
+		return false
+	}
+
+	protected getResponsesCapabilities(): ResponsesCapabilities {
+		return {
+			supportsStreaming: true,
+			supportsTools: true,
+			supportsReasoningEffort: true,
+			supportsTemperature: true,
+			supportsMaxOutputTokens: true,
+			supportsStatefulResponses: false,
+		}
+	}
+
+	protected normalizeResponsesUsage(usage: unknown): ApiStreamUsageChunk | undefined {
+		if (!usage || typeof usage !== "object") return undefined
+		const responseUsage = usage as {
+			input_tokens?: number
+			output_tokens?: number
+			input_tokens_details?: { cached_tokens?: number }
+			output_tokens_details?: { reasoning_tokens?: number }
+		}
+		const normalized = this.processUsageMetrics(
+			{
+				prompt_tokens: responseUsage.input_tokens,
+				completion_tokens: responseUsage.output_tokens,
+				prompt_tokens_details: { cached_tokens: responseUsage.input_tokens_details?.cached_tokens },
+			},
+			this.getModel().info,
+		)
+		const reasoningTokens = responseUsage.output_tokens_details?.reasoning_tokens
+		return typeof reasoningTokens === "number" ? { ...normalized, reasoningTokens } : normalized
+	}
 
 	constructor({
 		providerName,
@@ -115,6 +152,25 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		if (this.options.openAiEndpointMode === "responses" && this.supportsResponses()) {
+			try {
+				yield* createResponsesStream({
+					client: this.client,
+					model: this.getModel(),
+					options: this.options,
+					systemPrompt,
+					messages,
+					metadata,
+					capabilities: this.getResponsesCapabilities(),
+					normalizeUsage: (usage) => this.normalizeResponsesUsage(usage),
+					convertToolsForOpenAI: (tools) => this.convertToolsForOpenAI(tools),
+				})
+			} catch (error) {
+				throw handleOpenAIError(error, this.providerName)
+			}
+			return
+		}
+
 		const stream = await this.createStream(systemPrompt, messages, metadata)
 
 		const matcher = new TagMatcher(
@@ -213,6 +269,23 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 	}
 
 	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+		if (this.options.openAiEndpointMode === "responses" && this.supportsResponses()) {
+			try {
+				return await completeResponsesPrompt({
+					client: this.client,
+					model: this.getModel(),
+					options: this.options,
+					messages: [{ role: "user", content: prompt }],
+					completePromptOptions: _options,
+					capabilities: this.getResponsesCapabilities(),
+					normalizeUsage: (usage) => this.normalizeResponsesUsage(usage),
+					convertToolsForOpenAI: (tools) => this.convertToolsForOpenAI(tools),
+				})
+			} catch (error) {
+				throw handleOpenAIError(error, this.providerName)
+			}
+		}
+
 		const { id: modelId, info: modelInfo } = this.getModel()
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {

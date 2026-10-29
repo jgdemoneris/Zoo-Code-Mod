@@ -63,6 +63,9 @@ export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
  */
 export const DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS = false
 
+/** Preserve the single-skill prompt mandate unless the user disables it. */
+export const DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE = true
+
 /**
  * Terminal output preview size options for persisted command output.
  *
@@ -233,6 +236,7 @@ export const globalSettingsSchema = z.object({
 	maxWorkspaceFiles: z.number().optional(),
 	showRooIgnoredFiles: z.boolean().optional(),
 	enableSubfolderRules: z.boolean().optional(),
+	enforceSingleSkillMandate: z.boolean().optional(),
 	maxImageFileSize: z.number().optional(),
 	maxTotalImageSize: z.number().optional(),
 

@@ -1,4 +1,5 @@
 import type { SkillsManager } from "../../../services/skills/SkillsManager"
+import { DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE } from "@roo-code/types"
 import type { EffectiveToolPolicy } from "../tools/effective-tool-policy"
 
 type SkillsManagerLike = Pick<SkillsManager, "getSkillsForMode">
@@ -24,6 +25,7 @@ export async function getSkillsSection(
 	skillsManager: SkillsManagerLike | undefined,
 	currentMode: string | undefined,
 	policy: EffectiveToolPolicy,
+	enforceSingleSkillMandate: boolean = DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE,
 ): Promise<string> {
 	// The protocol in this section mandates the `skill` tool; if it's not available
 	// the section would be unhelpful/unactionable, so emit nothing.
@@ -64,8 +66,8 @@ Step 1: Skill Evaluation
 Step 2: Branching Decision
 
 <if_skill_applies>
-- Select EXACTLY ONE skill.
-- Prefer the most specific skill when multiple skills match.
+- ${enforceSingleSkillMandate ? "Select EXACTLY ONE skill." : "Select all skills that are relevant to the task."}
+- ${enforceSingleSkillMandate ? "Prefer the most specific skill when multiple skills match." : "Prefer the most specific skills when multiple skills match."}
 - Use the skill tool to load the skill by name.
 - Load the skill's instructions fully into context BEFORE continuing.
 - Follow the skill instructions precisely.

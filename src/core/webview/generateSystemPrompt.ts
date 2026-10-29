@@ -1,5 +1,6 @@
 import * as vscode from "vscode"
 import type { ModelInfo } from "@roo-code/types"
+import { DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE } from "@roo-code/types"
 import { WebviewMessage } from "../../shared/WebviewMessage"
 import { defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
@@ -28,6 +29,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		experiments,
 		language,
 		enableSubfolderRules,
+		enforceSingleSkillMandate,
 		disabledTools,
 	} = await provider.getState()
 
@@ -106,6 +108,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 			todoListEnabled: apiConfiguration?.todoListEnabled ?? true,
 			useAgentRules: vscode.workspace.getConfiguration(Package.name).get<boolean>("useAgentRules") ?? true,
 			enableSubfolderRules: enableSubfolderRules ?? false,
+			enforceSingleSkillMandate: enforceSingleSkillMandate ?? DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE,
 			newTaskRequireTodos: vscode.workspace
 				.getConfiguration(Package.name)
 				.get<boolean>("newTaskRequireTodos", false),

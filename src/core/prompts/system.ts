@@ -90,7 +90,7 @@ async function generatePrompt(
 
 	const [modesSection, skillsSection] = await Promise.all([
 		mode === "orchestrator" ? getModesSection(context) : Promise.resolve(""),
-		getSkillsSection(skillsManager, mode as string, policy),
+		getSkillsSection(skillsManager, mode as string, policy, settings?.enforceSingleSkillMandate),
 	])
 
 	// Tools catalog is not included in the system prompt.

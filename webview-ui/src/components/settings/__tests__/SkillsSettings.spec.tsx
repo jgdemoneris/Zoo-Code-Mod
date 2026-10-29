@@ -164,7 +164,12 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => mockExtensionState,
 }))
 
-const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string) => {
+const renderSkillsSettings = (
+	skills: SkillMetadata[] = mockSkills,
+	cwd?: string,
+	enforceSingleSkillMandate = true,
+	setEnforceSingleSkillMandate = vi.fn(),
+) => {
 	// Update the mock state before rendering
 	mockExtensionState = {
 		skills,
@@ -172,7 +177,12 @@ const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string
 		customModes: [],
 	}
 
-	return renderWithExtensionState(<SkillsSettings />)
+	return renderWithExtensionState(
+		<SkillsSettings
+			enforceSingleSkillMandate={enforceSingleSkillMandate}
+			setEnforceSingleSkillMandate={setEnforceSingleSkillMandate}
+		/>,
+	)
 }
 
 describe("SkillsSettings", () => {
@@ -191,6 +201,21 @@ describe("SkillsSettings", () => {
 		renderSkillsSettings()
 
 		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "requestSkills" })
+	})
+
+	it("renders the single-skill mandate enabled by default and reports toggles", () => {
+		const onChange = vi.fn()
+		renderSkillsSettings(mockSkills, undefined, true, onChange)
+
+		const checkbox = screen.getByTestId("checkbox-skills-single-skill-mandate") as HTMLInputElement
+		expect(checkbox.checked).toBe(true)
+		fireEvent.click(checkbox)
+		expect(onChange).toHaveBeenCalledWith(false)
+	})
+
+	it("reflects a disabled single-skill mandate", () => {
+		renderSkillsSettings(mockSkills, undefined, false)
+		expect(screen.getByTestId("checkbox-skills-single-skill-mandate")).not.toBeChecked()
 	})
 
 	it("displays project skills section when in a workspace", () => {

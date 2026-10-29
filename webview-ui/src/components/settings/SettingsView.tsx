@@ -39,6 +39,7 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE,
 	ImageGenerationProvider,
 } from "@roo-code/types"
 
@@ -221,6 +222,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCloseZooOpenedFiles,
 		autoCloseZooOpenedFilesAfterUserEdited,
 		autoCloseZooOpenedNewFiles,
+		enforceSingleSkillMandate,
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
@@ -456,6 +458,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					openRouterImageGenerationSelectedModel,
 					experiments,
 					customSupportPrompts,
+					enforceSingleSkillMandate: enforceSingleSkillMandate ?? DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE,
 				},
 			})
 
@@ -842,7 +845,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						{renderTab === "slashCommands" && <SlashCommandsSettings />}
 
 						{/* Skills Section */}
-						{renderTab === "skills" && <SkillsSettings />}
+						{renderTab === "skills" && (
+							<SkillsSettings
+								enforceSingleSkillMandate={enforceSingleSkillMandate}
+								setEnforceSingleSkillMandate={(value) =>
+									setCachedStateField("enforceSingleSkillMandate", value)
+								}
+							/>
+						)}
 
 						{/* Rules Section */}
 						{renderTab === "rules" && <RulesSettings />}

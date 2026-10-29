@@ -34,6 +34,25 @@ describe("getSkillsSection", () => {
 		expect(result).toContain("<description>Extracts text &amp; tables from PDFs</description>")
 		// For filesystem-based agents, location should be the absolute path to SKILL.md
 		expect(result).toContain("<location>/abs/path/pdf-processing/SKILL.md</location>")
+		expect(result).toContain("Select EXACTLY ONE skill.")
+	})
+
+	it("allows multiple relevant skills when the single-skill mandate is disabled", async () => {
+		const mockSkillsManager = {
+			getSkillsForMode: vi.fn().mockReturnValue([
+				{
+					name: "pdf-processing",
+					description: "Extracts text from PDFs",
+					path: "/abs/path/pdf-processing/SKILL.md",
+					source: "global" as const,
+				},
+			]),
+		}
+
+		const result = await getSkillsSection(mockSkillsManager, "code", policyFor(["skill"]), false)
+
+		expect(result).toContain("Select all skills that are relevant to the task.")
+		expect(result).not.toContain("Select EXACTLY ONE skill.")
 	})
 
 	it("should return empty string when skillsManager or currentMode is missing", async () => {

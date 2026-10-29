@@ -346,6 +346,7 @@ export type ExtensionState = Pick<
 	| "requestDelaySeconds"
 	| "showWorktreesInHomeScreen"
 	| "disabledTools"
+	| "enforceSingleSkillMandate"
 > & {
 	lockApiConfigAcrossModes?: boolean
 	version: string

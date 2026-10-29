@@ -29,11 +29,21 @@ import {
 } from "@/components/ui"
 import { vscode } from "@/utils/vscode"
 import { buildDocLink } from "@/utils/docLinks"
+import { DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE } from "@roo-code/types"
 
 import { SectionHeader } from "./SectionHeader"
 import { CreateSkillDialog } from "./CreateSkillDialog"
+import { SearchableSetting } from "./SearchableSetting"
 
-export const SkillsSettings: React.FC = () => {
+interface SkillsSettingsProps {
+	enforceSingleSkillMandate?: boolean
+	setEnforceSingleSkillMandate?: (value: boolean) => void
+}
+
+export const SkillsSettings: React.FC<SkillsSettingsProps> = ({
+	enforceSingleSkillMandate,
+	setEnforceSingleSkillMandate,
+}) => {
 	const { t } = useAppTranslation()
 	const { cwd, skills: rawSkills, customModes } = useExtensionState()
 	const skills = useMemo(() => rawSkills ?? [], [rawSkills])
@@ -232,6 +242,28 @@ export const SkillsSettings: React.FC = () => {
 							}}
 						/>
 					</p>
+
+					<SearchableSetting
+						settingId="skills-enforce-single-skill-mandate"
+						section="skills"
+						label={t("settings:skills.singleSkillMandate.label")}
+						className="flex flex-col gap-1">
+						<div className="flex items-start gap-3">
+							<Checkbox
+								id="skills-single-skill-mandate"
+								checked={enforceSingleSkillMandate ?? DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE}
+								onCheckedChange={(checked) => setEnforceSingleSkillMandate?.(checked === true)}
+							/>
+							<div className="flex flex-col gap-1">
+								<label htmlFor="skills-single-skill-mandate" className="cursor-pointer font-medium">
+									{t("settings:skills.singleSkillMandate.label")}
+								</label>
+								<p className="text-vscode-descriptionForeground text-sm m-0">
+									{t("settings:skills.singleSkillMandate.description")}
+								</p>
+							</div>
+						</div>
+					</SearchableSetting>
 
 					{/* Add Skill button */}
 					<Button variant="secondary" className="py-1" onClick={() => setCreateDialogOpen(true)}>

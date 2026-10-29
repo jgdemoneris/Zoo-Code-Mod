@@ -2009,6 +2009,23 @@ it("persists alwaysDenyUnapprovedCommands through the generic updateSettings loo
 	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 })
 
+it("persists enforceSingleSkillMandate through the generic updateSettings loop", async () => {
+	vi.clearAllMocks()
+
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: { enforceSingleSkillMandate: true },
+	})
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("enforceSingleSkillMandate", true)
+
+	vi.clearAllMocks()
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: { enforceSingleSkillMandate: false },
+	})
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("enforceSingleSkillMandate", false)
+})
+
 // Both allowlists are normalized by the same branch, so both are held to the
 // same contract.
 describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {

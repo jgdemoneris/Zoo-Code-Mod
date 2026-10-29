@@ -4,6 +4,7 @@
 export interface SystemPromptSettings {
 	todoListEnabled: boolean
 	useAgentRules: boolean
+	enforceSingleSkillMandate?: boolean
 	/** When true, recursively discover and load .roo/rules from subdirectories */
 	enableSubfolderRules?: boolean
 	newTaskRequireTodos: boolean

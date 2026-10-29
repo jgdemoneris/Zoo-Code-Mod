@@ -57,6 +57,7 @@ import {
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
+	DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -5261,8 +5262,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const rooIgnoreInstructions = this.rooIgnoreController?.getInstructions()
 
-		const { customModes, customModePrompts, customInstructions, experiments, language, enableSubfolderRules } =
-			requestState ?? {}
+		const {
+			customModes,
+			customModePrompts,
+			customInstructions,
+			experiments,
+			language,
+			enableSubfolderRules,
+			enforceSingleSkillMandate,
+		} = requestState ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
 		const apiConfiguration = this.apiConfiguration
@@ -5300,6 +5308,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					newTaskRequireTodos: vscode.workspace
 						.getConfiguration(Package.name)
 						.get<boolean>("newTaskRequireTodos", false),
+					enforceSingleSkillMandate: enforceSingleSkillMandate ?? DEFAULT_ENFORCE_SINGLE_SKILL_MANDATE,
 					isStealthModel: modelInfo?.isStealthModel,
 				},
 				undefined, // todoList

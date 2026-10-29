@@ -141,7 +141,7 @@
 	},
 	"api/providers/__tests__/deepseek.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 11
 		}
 	},
 	"api/providers/__tests__/gemini-handler.spec.ts": {

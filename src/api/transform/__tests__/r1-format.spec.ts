@@ -637,6 +637,119 @@ describe("convertToR1Format", () => {
 			})
 		})
 	})
+
+	describe("request-local reasoning compatibility policy", () => {
+		const preserveReadable = { reasoningContentPolicy: "preserve-readable" as const }
+		const deepSeekThinkingTools = { reasoningContentPolicy: "deepseek-thinking-tools" as const }
+
+		it("preserves explicit empty top-level reasoning only when explicitly requested", () => {
+			const message = Object.assign({ role: "assistant" as const, content: "answer" }, { reasoning_content: "" })
+
+			expect(convertToR1Format([message])).toEqual([{ role: "assistant", content: "answer" }])
+			expect(convertToR1Format([message], preserveReadable)).toEqual([
+				{ role: "assistant", content: "answer", reasoning_content: "" },
+			])
+		})
+
+		it("accumulates ordered readable reasoning blocks only when opted in", () => {
+			const input = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "first" },
+						{ type: "thinking", thinking: " second", signature: "provider-signature" },
+						{ type: "reasoning", encrypted_content: "opaque", signature: "signature" },
+						{ type: "text", text: "answer" },
+					],
+				},
+			] as unknown as Anthropic.Messages.MessageParam[]
+
+			expect(convertToR1Format(input)).toEqual([
+				{ role: "assistant", content: "answer", reasoning_content: "first" },
+			])
+			expect(convertToR1Format(input, preserveReadable)).toEqual([
+				{ role: "assistant", content: "answer", reasoning_content: "first second" },
+			])
+		})
+
+		it("adds an empty fallback to assistant entries without portable reasoning and retains native reasoning", () => {
+			const input = [
+				{ role: "assistant" as const, content: "Foreign text-only turn" },
+				{ role: "user" as const, content: "Continue" },
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "thinking", thinking: "", signature: "foreign-signature" },
+						{ type: "reasoning", encrypted_content: "foreign-encrypted-state" },
+						{ type: "text", text: "Opaque state is not portable." },
+					],
+				},
+				{ role: "user" as const, content: "Continue again" },
+				{
+					role: "assistant" as const,
+					content: [{ type: "tool_use" as const, id: "call-1", name: "lookup", input: {} }],
+				},
+				{
+					role: "user" as const,
+					content: [{ type: "tool_result" as const, tool_use_id: "call-1", content: "done" }],
+				},
+				Object.assign(
+					{ role: "assistant" as const, content: "Native answer" },
+					{ reasoning_content: "native reasoning" },
+				),
+			] as Anthropic.Messages.MessageParam[]
+			const originalInput = structuredClone(input)
+
+			expect(convertToR1Format(input, deepSeekThinkingTools)).toEqual([
+				{ role: "assistant", content: "Foreign text-only turn", reasoning_content: "" },
+				{ role: "user", content: "Continue" },
+				{
+					role: "assistant",
+					content: "Opaque state is not portable.",
+					reasoning_content: "",
+				},
+				{ role: "user", content: "Continue again" },
+				{
+					role: "assistant",
+					content: null,
+					tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup", arguments: "{}" } }],
+					reasoning_content: "",
+				},
+				{ role: "tool", tool_call_id: "call-1", content: "done" },
+				{ role: "assistant", content: "Native answer", reasoning_content: "native reasoning" },
+			])
+			expect(input).toEqual(originalInput)
+		})
+
+		it("does not synthesize reasoning when only readable-preservation mode is selected", () => {
+			expect(convertToR1Format([{ role: "assistant", content: "Foreign answer" }], preserveReadable)).toEqual([
+				{ role: "assistant", content: "Foreign answer" },
+			])
+		})
+
+		it("keeps default adjacent-message behavior while accumulating only under opt-in", () => {
+			const messages = [
+				Object.assign({ role: "assistant" as const, content: "first" }, { reasoning_content: "one" }),
+				Object.assign({ role: "assistant" as const, content: "second" }, { reasoning_content: "two" }),
+			]
+
+			expect(convertToR1Format(messages)).toEqual([
+				{ role: "assistant", content: "first\nsecond", reasoning_content: "two" },
+			])
+			expect(convertToR1Format(messages, preserveReadable)).toEqual([
+				{ role: "assistant", content: "first\nsecond", reasoning_content: "onetwo" },
+			])
+		})
+
+		it("drops standalone role-less provider state rather than creating an empty chat message", () => {
+			const input = [
+				{ type: "reasoning", encrypted_content: "opaque", signature: "signature" },
+				{ role: "user", content: "hello" },
+			] as unknown as Anthropic.Messages.MessageParam[]
+
+			expect(convertToR1Format(input, preserveReadable)).toEqual([{ role: "user", content: "hello" }])
+		})
+	})
 })
 
 describe("convertToR1Format lone surrogate sanitization (#461)", () => {

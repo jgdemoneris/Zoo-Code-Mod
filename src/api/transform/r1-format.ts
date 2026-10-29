@@ -43,6 +43,8 @@ export function convertToR1Format(
 	options?: {
 		mergeToolResultText?: boolean
 		normalizeToolCallId?: (id: string) => string
+		/** DeepSeek thinking requests with tools require a string on every assistant turn. */
+		reasoningContentPolicy?: "preserve-readable" | "deepseek-thinking-tools"
 	},
 ): Message[] {
 	const result: Message[] = []
@@ -55,11 +57,14 @@ export function convertToR1Format(
 		sanitizeIdentifierSurrogates(options?.normalizeToolCallId ? options.normalizeToolCallId(id) : id)
 
 	for (const message of messages) {
+		const useReadableReasoningPolicy = options?.reasoningContentPolicy !== undefined
+		const ensureReasoningContent = options?.reasoningContentPolicy === "deepseek-thinking-tools"
 		// Check if the message has reasoning_content (for DeepSeek interleaved thinking)
 		const messageWithReasoning = message as AnthropicMessage & { reasoning_content?: string }
-		const reasoningContent = messageWithReasoning.reasoning_content
-			? sanitizeSurrogates(messageWithReasoning.reasoning_content)
-			: messageWithReasoning.reasoning_content
+		const reasoningContent =
+			typeof messageWithReasoning.reasoning_content === "string"
+				? sanitizeSurrogates(messageWithReasoning.reasoning_content)
+				: undefined
 
 		if (message.role === "user") {
 			// Handle user messages - may contain tool_result blocks
@@ -200,21 +205,40 @@ export function convertToR1Format(
 								arguments: JSON.stringify(sanitizeSurrogatesDeep(part.input)),
 							},
 						})
+					} else if (useReadableReasoningPolicy) {
+						const reasoningBlock = part as { type?: unknown; text?: unknown; thinking?: unknown }
+						const readableReasoning =
+							reasoningBlock.type === "reasoning" && typeof reasoningBlock.text === "string"
+								? reasoningBlock.text
+								: reasoningBlock.type === "thinking" && typeof reasoningBlock.thinking === "string"
+									? reasoningBlock.thinking
+									: undefined
+						// Only readable text is portable; signatures and encrypted state are not reasoning text.
+						if (readableReasoning !== undefined) {
+							extractedReasoning = (extractedReasoning ?? "") + sanitizeSurrogates(readableReasoning)
+						}
 					} else if ((part as any).type === "reasoning" && (part as any).text) {
-						// Extract reasoning from content blocks (Task stores it this way)
+						// Preserve the historical default: one non-empty Zoo reasoning block replaces the prior value.
 						extractedReasoning = sanitizeSurrogates((part as any).text)
 					}
 				}
 
-				// Use reasoning from content blocks if not provided at top level
-				const finalReasoning = reasoningContent || extractedReasoning
+				// Keep request-local policy explicit. A top-level empty string is meaningful when
+				// supplied by the native provider; the default retains historical behavior.
+				const finalReasoning = useReadableReasoningPolicy
+					? (reasoningContent ?? extractedReasoning)
+					: reasoningContent || extractedReasoning
+				const includeReasoning =
+					ensureReasoningContent ||
+					(useReadableReasoningPolicy ? finalReasoning !== undefined : Boolean(finalReasoning))
+				const outgoingReasoning = finalReasoning ?? (ensureReasoningContent ? "" : undefined)
 
 				const assistantMessage: DeepSeekAssistantMessage = {
 					role: "assistant",
 					content: textParts.length > 0 ? textParts.join("\n") : null,
 					...(toolCalls.length > 0 && { tool_calls: toolCalls }),
 					// Preserve reasoning_content for DeepSeek interleaved thinking
-					...(finalReasoning && { reasoning_content: finalReasoning }),
+					...(includeReasoning && { reasoning_content: outgoingReasoning }),
 				}
 
 				// Check if we can merge with the last message (only if no tool calls)
@@ -228,8 +252,11 @@ export function convertToR1Format(
 						lastMessage.content = `${lastContent}\n${assistantMessage.content}`
 					}
 					// Preserve reasoning_content from the new message if present
-					if (finalReasoning) {
-						;(lastMessage as DeepSeekAssistantMessage).reasoning_content = finalReasoning
+					if (includeReasoning) {
+						const previousReasoning = (lastMessage as DeepSeekAssistantMessage).reasoning_content
+						;(lastMessage as DeepSeekAssistantMessage).reasoning_content = useReadableReasoningPolicy
+							? (previousReasoning ?? "") + (outgoingReasoning ?? "")
+							: outgoingReasoning
 					}
 				} else {
 					result.push(assistantMessage)
@@ -237,6 +264,11 @@ export function convertToR1Format(
 			} else {
 				// Simple string content
 				const safeContent = sanitizeSurrogates(message.content)
+				const simpleReasoning = useReadableReasoningPolicy ? reasoningContent : reasoningContent || undefined
+				const includeSimpleReasoning =
+					ensureReasoningContent ||
+					(useReadableReasoningPolicy ? simpleReasoning !== undefined : Boolean(simpleReasoning))
+				const outgoingSimpleReasoning = simpleReasoning ?? (ensureReasoningContent ? "" : undefined)
 				const lastMessage = result[result.length - 1]
 				if (lastMessage?.role === "assistant" && !(lastMessage as any).tool_calls) {
 					if (typeof lastMessage.content === "string") {
@@ -245,14 +277,17 @@ export function convertToR1Format(
 						lastMessage.content = safeContent
 					}
 					// Preserve reasoning_content from the new message if present
-					if (reasoningContent) {
-						;(lastMessage as DeepSeekAssistantMessage).reasoning_content = reasoningContent
+					if (includeSimpleReasoning) {
+						const previousReasoning = (lastMessage as DeepSeekAssistantMessage).reasoning_content
+						;(lastMessage as DeepSeekAssistantMessage).reasoning_content = useReadableReasoningPolicy
+							? (previousReasoning ?? "") + (outgoingSimpleReasoning ?? "")
+							: outgoingSimpleReasoning
 					}
 				} else {
 					const assistantMessage: DeepSeekAssistantMessage = {
 						role: "assistant",
 						content: safeContent,
-						...(reasoningContent && { reasoning_content: reasoningContent }),
+						...(includeSimpleReasoning && { reasoning_content: outgoingSimpleReasoning }),
 					}
 					result.push(assistantMessage)
 				}

@@ -29,6 +29,8 @@ import { summarizeConversation } from "../../condense"
 import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
+import { convertToR1Format } from "../../../api/transform/r1-format"
+import { convertToOpenAiMessages } from "../../../api/transform/openai-format"
 import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
@@ -6806,6 +6808,56 @@ describe("Cline", () => {
 			const history = historyFor(false)
 
 			expect(history).toEqual([{ role: "assistant", content: "answer" }])
+		})
+
+		it("projects foreign Task tool history with an empty fallback and retains native reasoning", () => {
+			const foreignHistory = getTaskTestAccess(
+				new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, task: "test", startTask: false }),
+			).buildCleanConversationHistory(
+				[
+					{ role: "user", content: [{ type: "text", text: "Foreign request" }], ts: 0 } as ApiMessage,
+					{
+						role: "assistant",
+						content: [
+							{ type: "text", text: "Foreign answer" },
+							{ type: "tool_use", id: "foreign-tool", name: "lookup", input: {} },
+						],
+						ts: 1,
+					} as ApiMessage,
+					{
+						role: "user",
+						content: [{ type: "tool_result", tool_use_id: "foreign-tool", content: "lookup result" }],
+						ts: 2,
+					} as ApiMessage,
+				],
+				{ contextWindow: 1_000, supportsPromptCache: false, preserveReasoning: false },
+			)
+			const deepSeekForeign = convertToR1Format(foreignHistory as Anthropic.Messages.MessageParam[], {
+				reasoningContentPolicy: "deepseek-thinking-tools",
+			})
+			expect(deepSeekForeign).toEqual([
+				{ role: "user", content: "Foreign request" },
+				{
+					role: "assistant",
+					content: "Foreign answer",
+					tool_calls: [
+						{ id: "foreign-tool", type: "function", function: { name: "lookup", arguments: "{}" } },
+					],
+					reasoning_content: "",
+				},
+				{ role: "tool", tool_call_id: "foreign-tool", content: "lookup result" },
+			])
+
+			const deepSeekNative = convertToR1Format(historyFor(true) as Anthropic.Messages.MessageParam[], {
+				reasoningContentPolicy: "deepseek-thinking-tools",
+			})
+			expect(deepSeekNative).toEqual([
+				{ role: "assistant", content: "answer", reasoning_content: "hidden chain of thought" },
+			])
+
+			const reverseHistory = historyFor(false)
+			const reverseProjected = convertToOpenAiMessages(reverseHistory as Anthropic.Messages.MessageParam[])
+			expect(reverseProjected[0]).not.toHaveProperty("reasoning_content")
 		})
 	})
 

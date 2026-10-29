@@ -153,6 +153,13 @@ export class DeepSeekHandler extends OpenAiHandler {
 		// See: https://api-docs.deepseek.com/guides/thinking_mode
 		const convertedMessages = convertToR1Format([{ role: "user", content: systemPrompt }, ...messages], {
 			mergeToolResultText: isThinkingModel,
+			...(isThinkingModel &&
+				(metadata?.tools?.length ?? 0) > 0 && {
+					// DeepSeek requires reasoning_content on every prior assistant turn when tools are
+					// supplied. Keep genuine readable/native reasoning; use an empty compatibility value
+					// only when this history has no portable reasoning. This does not reconstruct CoT.
+					reasoningContentPolicy: "deepseek-thinking-tools" as const,
+				}),
 		})
 
 		const requestOptions: DeepSeekChatCompletionParams = {

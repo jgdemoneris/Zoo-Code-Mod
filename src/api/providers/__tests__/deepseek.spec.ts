@@ -5,125 +5,79 @@ import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 const mockCreate = vi.fn()
 vi.mock("openai", () => {
+	const createClient = () => ({
+		chat: { completions: { create: mockCreate } },
+	})
 	return {
 		__esModule: true,
 		default: vi.fn().mockImplementation(function () {
-			return {
-				chat: {
-					completions: {
-						create: mockCreate.mockImplementation(async (options) => {
-							if (!options.stream) {
-								return {
-									id: "test-completion",
-									choices: [
-										{
-											message: { role: "assistant", content: "Test response", refusal: null },
-											finish_reason: "stop",
-											index: 0,
-										},
-									],
-									usage: {
-										prompt_tokens: 10,
-										completion_tokens: 5,
-										total_tokens: 15,
-										prompt_tokens_details: {
-											cache_miss_tokens: 8,
-											cached_tokens: 2,
-										},
-									},
-								}
-							}
-
-							// Check if this is a reasoning_content test by looking at thinking mode
-							const isThinkingModel = options.thinking?.type === "enabled"
-							const isToolCallTest = options.tools?.length > 0
-
-							const chunks: unknown[] = []
-
-							// For thinking models, emit reasoning_content first
-							if (isThinkingModel) {
-								chunks.push(
-									{
-										choices: [
-											{
-												delta: { reasoning_content: "Let me think about this..." },
-												index: 0,
-											},
-										],
-										usage: null,
-									},
-									{
-										choices: [
-											{
-												delta: { reasoning_content: " I'll analyze step by step." },
-												index: 0,
-											},
-										],
-										usage: null,
-									},
-								)
-							}
-
-							// For tool call tests with thinking mode, emit tool call
-							if (isThinkingModel && isToolCallTest) {
-								chunks.push({
-									choices: [
-										{
-											delta: {
-												tool_calls: [
-													{
-														index: 0,
-														id: "call_123",
-														function: {
-															name: "get_weather",
-															arguments: '{"location":"SF"}',
-														},
-													},
-												],
-											},
-											index: 0,
-										},
-									],
-									usage: null,
-								})
-							} else {
-								chunks.push({
-									choices: [
-										{
-											delta: { content: "Test response" },
-											index: 0,
-										},
-									],
-									usage: null,
-								})
-							}
-
-							chunks.push({
-								choices: [
-									{
-										delta: {},
-										index: 0,
-										finish_reason: isToolCallTest ? "tool_calls" : "stop",
-									},
-								],
-								usage: {
-									prompt_tokens: 10,
-									completion_tokens: 5,
-									total_tokens: 15,
-									prompt_tokens_details: {
-										cache_miss_tokens: 8,
-										cached_tokens: 2,
-									},
-								},
-							})
-
-							return asyncStreamFrom(chunks)
-						}),
-					},
-				},
-			}
+			return createClient()
+		}),
+		AzureOpenAI: vi.fn().mockImplementation(function () {
+			return createClient()
 		}),
 	}
+})
+
+mockCreate.mockImplementation(async (options) => {
+	if (!options.stream) {
+		return {
+			id: "test-completion",
+			choices: [
+				{
+					message: { role: "assistant", content: "Test response", refusal: null },
+					finish_reason: "stop",
+					index: 0,
+				},
+			],
+			usage: {
+				prompt_tokens: 10,
+				completion_tokens: 5,
+				total_tokens: 15,
+				prompt_tokens_details: { cache_miss_tokens: 8, cached_tokens: 2 },
+			},
+		}
+	}
+	const thinking = options.thinking?.type === "enabled"
+	const tool = options.tools?.length > 0
+	const chunks: unknown[] = []
+	if (thinking) {
+		chunks.push(
+			{ choices: [{ delta: { reasoning_content: "Let me think about this..." }, index: 0 }], usage: null },
+			{ choices: [{ delta: { reasoning_content: " I'll analyze step by step." }, index: 0 }], usage: null },
+		)
+	}
+	if (thinking && tool) {
+		chunks.push({
+			choices: [
+				{
+					delta: {
+						tool_calls: [
+							{
+								index: 0,
+								id: "call_123",
+								function: { name: "get_weather", arguments: '{"location":"SF"}' },
+							},
+						],
+					},
+					index: 0,
+				},
+			],
+			usage: null,
+		})
+	} else {
+		chunks.push({ choices: [{ delta: { content: "Test response" }, index: 0 }], usage: null })
+	}
+	chunks.push({
+		choices: [{ delta: {}, index: 0, finish_reason: tool ? "tool_calls" : "stop" }],
+		usage: {
+			prompt_tokens: 10,
+			completion_tokens: 5,
+			total_tokens: 15,
+			prompt_tokens_details: { cache_miss_tokens: 8, cached_tokens: 2 },
+		},
+	})
+	return asyncStreamFrom(chunks)
 })
 
 import OpenAI from "openai"
@@ -147,6 +101,29 @@ describe("DeepSeekHandler", () => {
 		}
 		handler = new DeepSeekHandler(mockOptions)
 		clearAllMocks()
+	})
+
+	it("uses Chat Completions for createMessage when a saved Responses preference is present", async () => {
+		const savedPreferenceHandler = new DeepSeekHandler({ ...mockOptions, openAiEndpointMode: "responses" })
+
+		await collectStream(savedPreferenceHandler.createMessage("System", [{ role: "user", content: "Hello" }]))
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({
+			model: "deepseek-v4-flash",
+			messages: expect.any(Array),
+			stream: true,
+		})
+	})
+
+	it("uses Chat Completions for inherited completePrompt when a saved Responses preference is present", async () => {
+		const savedPreferenceHandler = new DeepSeekHandler({ ...mockOptions, openAiEndpointMode: "responses" })
+
+		expect(await savedPreferenceHandler.completePrompt("Complete this")).toBe("Test response")
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: "deepseek-v4-flash", messages: expect.any(Array) })
+		expect(mockCreate.mock.calls[0][0].stream).not.toBe(true)
 	})
 
 	describe("completePrompt reasoning", () => {
@@ -364,6 +341,7 @@ describe("DeepSeekHandler", () => {
 			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks.length).toBeGreaterThan(0)
+			expect(mockCreate).toHaveBeenCalledOnce()
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
@@ -692,7 +670,7 @@ describe("DeepSeekHandler", () => {
 				apiModelId: "deepseek-v4-pro",
 			})
 
-			const tools: any[] = [
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
 				{
 					type: "function",
 					function: {
@@ -714,6 +692,137 @@ describe("DeepSeekHandler", () => {
 			const toolCallChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
 			expect(toolCallChunks.length).toBeGreaterThan(0)
 			expect(toolCallChunks[0].name).toBe("get_weather")
+		})
+
+		it("adds an empty compatibility value for foreign turns and preserves native reasoning", async () => {
+			const reasonerHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-pro",
+			})
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "get_weather", description: "Get weather", parameters: { type: "object" } },
+				},
+			]
+			const foreignHistory: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Start a search." },
+				{ role: "assistant", content: "I will check that." },
+				{ role: "user", content: "Find the weather." },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "Checking." },
+						{ type: "tool_use", id: "foreign-call", name: "get_weather", input: {} },
+					],
+				},
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "foreign-call", content: "Sunny" }] },
+			]
+			const originalHistory = structuredClone(foreignHistory)
+
+			await collectStream(reasonerHandler.createMessage(systemPrompt, foreignHistory, { taskId: "test", tools }))
+
+			const firstRequest = mockCreate.mock.calls[0][0]
+			expect(firstRequest.thinking).toEqual({ type: "enabled" })
+			expect(firstRequest.messages.filter((message: { role: string }) => message.role === "assistant")).toEqual([
+				{ role: "assistant", content: "I will check that.", reasoning_content: "" },
+				expect.objectContaining({
+					role: "assistant",
+					content: "Checking.",
+					reasoning_content: "",
+					tool_calls: [
+						{
+							id: "foreign-call",
+							type: "function",
+							function: { name: "get_weather", arguments: "{}" },
+						},
+					],
+				}),
+			])
+			expect(firstRequest.messages).toContainEqual({
+				role: "assistant",
+				content: "Checking.",
+				reasoning_content: "",
+				tool_calls: [
+					{
+						id: "foreign-call",
+						type: "function",
+						function: { name: "get_weather", arguments: "{}" },
+					},
+				],
+			})
+			// The SDK's JSON serialization must retain the empty string rather than omit the field.
+			expect(JSON.parse(JSON.stringify(firstRequest.messages))).toEqual(firstRequest.messages)
+
+			const nativeFollowUp: Anthropic.Messages.MessageParam[] = [
+				...foreignHistory,
+				Object.assign(
+					{
+						role: "assistant" as const,
+						content: [{ type: "tool_use" as const, id: "deepseek-call", name: "get_weather", input: {} }],
+					},
+					{ reasoning_content: "Native top-level reasoning." },
+				),
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "deepseek-call", content: "Still sunny" }],
+				},
+			]
+
+			await collectStream(reasonerHandler.createMessage(systemPrompt, nativeFollowUp, { taskId: "test", tools }))
+
+			const secondRequest = mockCreate.mock.calls[1][0]
+			expect(secondRequest.messages).toContainEqual(
+				expect.objectContaining({
+					role: "assistant",
+					reasoning_content: "Native top-level reasoning.",
+					tool_calls: [expect.objectContaining({ id: "deepseek-call" })],
+				}),
+			)
+			expect(secondRequest.messages.filter((message: { role: string }) => message.role === "assistant")).toEqual([
+				{ role: "assistant", content: "I will check that.", reasoning_content: "" },
+				expect.objectContaining({ role: "assistant", reasoning_content: "", tool_calls: [expect.any(Object)] }),
+				expect.objectContaining({
+					role: "assistant",
+					reasoning_content: "Native top-level reasoning.",
+					tool_calls: [expect.objectContaining({ id: "deepseek-call" })],
+				}),
+			])
+			expect(foreignHistory).toEqual(originalHistory)
+		})
+
+		it("does not add empty reasoning when a thinking request has no tools", async () => {
+			const history: Anthropic.Messages.MessageParam[] = [
+				{ role: "assistant", content: "Earlier foreign answer" },
+				{ role: "user", content: "Continue without tools." },
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, history))
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).toEqual({ type: "enabled" })
+			expect(request.messages).toContainEqual({ role: "assistant", content: "Earlier foreign answer" })
+		})
+
+		it("does not enable the reasoning compatibility policy when thinking is disabled", async () => {
+			const disabledHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-pro",
+				enableReasoningEffort: false,
+			})
+			const history = [
+				{ role: "assistant" as const, content: "Earlier answer", reasoning_content: "" },
+				{ role: "user" as const, content: "Continue." },
+			]
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{ type: "function", function: { name: "get_weather", parameters: { type: "object" } } },
+			]
+
+			await collectStream(disabledHandler.createMessage(systemPrompt, history, { taskId: "test", tools }))
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).toEqual({ type: "disabled" })
+			expect(request.messages).toContainEqual({ role: "assistant", content: "Earlier answer" })
 		})
 	})
 
